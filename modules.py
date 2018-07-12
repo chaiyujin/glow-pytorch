@@ -62,7 +62,7 @@ class _ActNorm(nn.Module):
         self._check_input_dim(input)
         input_size = input.size()
         # set logdet_factor
-        self.logdet_factor = np.prod([int(input_size[i]) for i in range(2, len(input_size))])
+        self.logdet_factor = float(np.prod([int(input_size[i]) for i in range(2, len(input_size))]))
         
         # transpose feature to last dim
         input = input.transpose(1, -1).contiguous()
@@ -88,7 +88,8 @@ class ActNorm2d(_ActNorm):
     def _check_input_dim(self, input):
         assert len(input.size()) == 4
         assert input.size(1) == self.num_features, (
-            "[ActNorm]: input should be in shape as `BCHW`")
+            "[ActNorm]: input should be in shape as `BCHW`,"
+            " channels should be {} rather than {}".format(self.num_features, input.size()))
 
 
 class LinearZeros(nn.Linear):
@@ -143,7 +144,7 @@ class Conv2d(nn.Conv2d):
     def forward(self, input):
         x = super().forward(input)
         if self.do_actnorm:
-            x = self.actnorm(x)
+            x, _ = self.actnorm(x)
         return x
 
 
@@ -165,23 +166,38 @@ class Conv2dZeros(nn.Conv2d):
         return output * torch.exp(self.logs * self.logscale_factor)
 
 
-class Permute2d:
-    @staticmethod
-    def reverse(input):
-        return input[:, ::-1, :, :]
+class Permute2d(nn.Module):
+    def __init__(self, num_channels, shuffle):
+        super().__init__()
+        self.num_channels = num_channels
+        self.shuffle = shuffle
+        self.indices = np.arange(self.num_channels - 1, -1, -1).astype(np.long)
+        self.indices_inverse = np.zeros((self.num_channels), dtype=np.long)
+        for i in range(self.num_channels):
+            self.indices_inverse[self.indices[i]] = i
 
-    @staticmethod
-    def shuffle(input):
-        idx = np.arange(input.size(1))
-        np.random.shuffle(idx)
-        return input[:, idx, :, :]
+    def reset_indices(self):
+        np.random.shuffle(self.indices)
+        for i in range(self.num_channels):
+            self.indices_inverse[self.indices[i]] = i
+        print(self.indices)
+        print(self.indices_inverse)
+
+    def forward(self, input, reverse=False):
+        assert len(input.size()) == 4
+        if not reverse:
+            if self.shuffle:
+                self.reset_indices()
+            return input[:, self.indices, :, :]
+        else:
+            return input[:, self.indices_inverse, :, :]
 
 
 class InvertibleConv1x1(nn.Module):
-    def __init__(self, in_channels, LU_decomposed=False):
+    def __init__(self, num_channels, LU_decomposed=False):
         super().__init__()
         if not LU_decomposed:
-            w_shape = [in_channels, in_channels]
+            w_shape = [num_channels, num_channels]
             self.w_shape = w_shape
             self.logdet_factor = w_shape[-1] * w_shape[-2]
             # Sample a random orthogonal matrix:
@@ -203,50 +219,85 @@ class InvertibleConv1x1(nn.Module):
             return z, logdet - dlogdet
 
 
-class Squeeze2d(nn.Module):
-    def __init__(self, factor):
-        assert factor >= 1 and isinstance(factor, int)
+class GaussianDiag:
+    @staticmethod
+    def logps(mean, logs, x):
+        return -0.5 * (logs * np.log(2 * np.pi) + 2. + (x - mean) ** 2 / torch.exp(2. * logs))
+
+    @staticmethod
+    def logp(mean, logs, x):
+        return torch.sum(GaussianDiag.logps(mean, logs, x))
+
+    @staticmethod
+    def sample(mean, logs, eps_std=None):
+        mean_size = [int(d) for d in mean.size()]
+        if eps_std is None:
+            eps = np.random.normal(0, eps_std, mean_size)
+        else:
+            eps = np.random.normal(0, 1, mean_size)
+        return mean + torch.exp(logs) * eps
+
+
+class Split2d(nn.Module):
+    def __init__(self, num_channels):
         super().__init__()
-        self.factor = factor
+        self.conv = Conv2dZeros(num_channels // 2, num_channels)
 
-    def forward(self, input):
-        if self.factor == 1:
-            return input
-        factor = self.factor
-        size = input.size()
-        B = size[0]
-        C = size[1]
-        H = size[2]
-        W = size[3]
-        assert H % factor == 0 and W % factor == 0
-        x = input.permute(0, 2, 3, 1).contiguous()
-        x = x.view(B, H // factor, factor, W // factor, factor, C)
-        x = x.permute(0, 1, 3, 5, 2, 4).contiguous()
-        x = x.view(B, H // factor, W // factor, C * factor * factor).permute(0, 3, 1, 2).contiguous()
-        return x
+    def split2d_prior(self, z):
+        h = self.conv(z)
+        mean = h[:, 0::2, :, :]
+        logs = h[:, 1::2, :, :]
+        return mean, logs
+
+    def forward(self, input, logdet=0., reverse=False, eps_std=None):
+        if not reverse:
+            C = input.size(1)
+            z1 = input[:, :C // 2, :, :]
+            z2 = input[:, C // 2:, :, :]
+            mean, logs = self.split2d_prior(z1)
+            logdet += GaussianDiag.logp(mean, logs, z2)
+            z1 = squeeze2d(z1)
+            return z1, logdet
+        else:
+            z1 = unsqueeze2d(input)
+            mean, logs = self.split2d_prior(z1)
+            z2 = GaussianDiag.sample(mean, logs, eps_std)
+            z = torch.cat((z1, z2), dim=1)
+            return z
 
 
-class Unsqueeze2d(nn.Module):
-    def __init__(self, factor):
-        assert factor >= 1 and isinstance(factor, int)
-        super().__init__()
-        self.factor = factor
+def squeeze2d(input, factor=2):
+    assert factor >= 1 and isinstance(factor, int)
+    if factor == 1:
+        return input    
+    size = input.size()
+    B = size[0]
+    C = size[1]
+    H = size[2]
+    W = size[3]
+    assert H % factor == 0 and W % factor == 0, "{}".format((H, W))
+    x = input.permute(0, 2, 3, 1).contiguous()
+    x = x.view(B, H // factor, factor, W // factor, factor, C)
+    x = x.permute(0, 1, 3, 5, 2, 4).contiguous()
+    x = x.view(B, H // factor, W // factor, C * factor * factor).permute(0, 3, 1, 2).contiguous()
+    return x
 
-    def forward(self, input):
-        if self.factor == 1:
-            return input
-        factor = self.factor
-        size = input.size()
-        B = size[0]
-        C = size[1]
-        H = size[2]
-        W = size[3]
-        assert C % (factor ** 2) == 0
-        x = input.permute(0, 2, 3, 1).contiguous()
-        x = x.view(B, H, W, C // (factor ** 2), factor, factor)
-        x = x.permute(0, 1, 4, 2, 5, 3).contiguous()
-        x = x.view(B, H * factor, W * factor, C // (factor ** 2)).permute(0, 3, 1, 2).contiguous()
-        return x
+
+def unsqueeze2d(input, factor=2):
+    assert factor >= 1 and isinstance(factor, int)
+    if factor == 1:
+        return input
+    size = input.size()
+    B = size[0]
+    C = size[1]
+    H = size[2]
+    W = size[3]
+    assert C % (factor ** 2) == 0, "{}".format(C)
+    x = input.permute(0, 2, 3, 1).contiguous()
+    x = x.view(B, H, W, C // (factor ** 2), factor, factor)
+    x = x.permute(0, 1, 4, 2, 5, 3).contiguous()
+    x = x.view(B, H * factor, W * factor, C // (factor ** 2)).permute(0, 3, 1, 2).contiguous()
+    return x
 
 
 def test_actnorm():
@@ -257,7 +308,6 @@ def test_actnorm():
     y = y.permute(0, 2, 3, 1).contiguous().view(-1, 16)
     y = y.mean(dim=0)
     print(y.size())
-    print(y)
 
     conv2d = Conv2dZeros(16, 5)
     y = conv2d(x)
@@ -266,20 +316,9 @@ def test_actnorm():
 
     # test squeeze
     print("squeeze")
-    squeeze = Squeeze2d(2)
-    unsquee = Unsqueeze2d(2)
-
-    print(x.size())
-    x_ = squeeze(x)
-    print(x_.size())
-    x_r = unsquee(x_)
-    print(x_r.size())
-    print(torch.max(torch.abs(x_r - x)))
-
-    conv1x1 = InvertibleConv1x1(16)
-    x_, logdet = conv1x1(x, 0)
-    print(x_.size())
-    print(logdet.size())
+    x_ = squeeze2d(x, 2)
+    x_r = unsqueeze2d(x_, 2)
+    print("  delta", torch.max(torch.abs(x_r - x)))
 
 
 if __name__ == "__main__":
