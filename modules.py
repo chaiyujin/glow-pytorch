@@ -22,6 +22,7 @@ class _ActNorm(nn.Module):
         self.logdet_factor = None
         self.scale = scale
         self.logscale_factor = logscale_factor
+        self.inited = False
 
     def _check_input_dim(self, input):
         return NotImplemented
@@ -37,6 +38,7 @@ class _ActNorm(nn.Module):
             logs = torch.log(self.scale/(torch.sqrt(var)+1e-6)) / self.logscale_factor
             self.bias.data.copy_(mean.data)
             self.logs.data.copy_(logs.data)
+            self.inited = True
 
     def _center(self, input, reverse=False):
         if not reverse:
@@ -59,6 +61,8 @@ class _ActNorm(nn.Module):
         return input, logdet
 
     def forward(self, input, logdet=None, reverse=False):
+        if not self.inited:
+            self.initialize_parameters(input)
         self._check_input_dim(input)
         input_size = input.size()
         # set logdet_factor
@@ -71,7 +75,7 @@ class _ActNorm(nn.Module):
         if not reverse:
             # center and scale
             input = self._center(input, reverse)
-            # input, logdet = self._scale(input, logdet, reverse)
+            input, logdet = self._scale(input, logdet, reverse)
         else:
             # scale and center
             input, logdet = self._scale(input, logdet, reverse)
@@ -180,8 +184,8 @@ class Permute2d(nn.Module):
         np.random.shuffle(self.indices)
         for i in range(self.num_channels):
             self.indices_inverse[self.indices[i]] = i
-        print(self.indices)
-        print(self.indices_inverse)
+        # print(self.indices)
+        # print(self.indices_inverse)
 
     def forward(self, input, reverse=False):
         assert len(input.size()) == 4
@@ -206,17 +210,20 @@ class InvertibleConv1x1(nn.Module):
         else:
             raise NotImplementedError()
 
-    def forward(self, input, logdet, reverse=False):
-        assert logdet is not None
+    def forward(self, input, logdet=None, reverse=False):
         dlogdet = torch.log(torch.abs(torch.det(self.weight))) * self.logdet_factor
         if not reverse:
             weight = self.weight.view(self.w_shape[0], self.w_shape[1], 1, 1)
             z = F.conv2d(input, weight)
-            return z, logdet + dlogdet
+            if logdet is not None:
+                logdet = logdet + dlogdet
+            return z, logdet
         else:
             weight = self.weight.inverse().view(self.w_shape[0], self.w_shape[1], 1, 1)
             z = F.conv2d(input, weight)
-            return z, logdet - dlogdet
+            if logdet is not None:
+                logdet = logdet - dlogdet
+            return z, logdet
 
 
 class GaussianDiag:
@@ -231,10 +238,10 @@ class GaussianDiag:
     @staticmethod
     def sample(mean, logs, eps_std=None):
         mean_size = [int(d) for d in mean.size()]
-        if eps_std is None:
-            eps = np.random.normal(0, eps_std, mean_size)
+        if eps_std is not None:
+            eps = torch.Tensor(np.random.normal(0, eps_std, mean_size)).to(mean.device)
         else:
-            eps = np.random.normal(0, 1, mean_size)
+            eps = torch.Tensor(np.random.normal(0, 1, mean_size)).to(mean.device)
         return mean + torch.exp(logs) * eps
 
 
@@ -305,9 +312,8 @@ def test_actnorm():
     x = torch.Tensor(np.random.rand(2, 16, 4, 4))
     actnorm.initialize_parameters(x)
     y, _ = actnorm(x)
-    y = y.permute(0, 2, 3, 1).contiguous().view(-1, 16)
-    y = y.mean(dim=0)
-    print(y.size())
+    x_, _ = actnorm(y, None, True)
+    print("actnorm (forward, reverse) delta", float(torch.max(torch.abs(x_ - x))))
 
     conv2d = Conv2dZeros(16, 5)
     y = conv2d(x)
@@ -315,10 +321,9 @@ def test_actnorm():
     print("conv2d weight", conv2d.weight.size())
 
     # test squeeze
-    print("squeeze")
     x_ = squeeze2d(x, 2)
     x_r = unsqueeze2d(x_, 2)
-    print("  delta", torch.max(torch.abs(x_r - x)))
+    print("squeeze2d unsqueeze2d delta", torch.max(torch.abs(x_r - x)))
 
 
 if __name__ == "__main__":

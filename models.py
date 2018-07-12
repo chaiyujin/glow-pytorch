@@ -131,27 +131,28 @@ class FlowNet(nn.Module):
 
     def decode(self, z, eps_std=None):
         for i in reversed(range(len(self.flow_steps))):
+            print(i, z.size())
             if i < len(self.flow_pools):
-                z, _ = self.flow_pools[i](z, None, eps_std=eps_std, reverse=True)
+                z = self.flow_pools[i](z, None, eps_std=eps_std, reverse=True)
             z, _ = self.flow_steps[i](z, None, reverse=True)
         return z
 
 
 def test_flow_step():
-    flow_step = FlowStep(64, 128, flow_permutation="invconv1x1").cuda()
-    x = torch.Tensor(np.random.rand(4, 64, 16, 16)).cuda()
+    flow_step = FlowStep(64, 128, flow_permutation="invconv1x1")
+    x = torch.Tensor(np.random.rand(4, 64, 16, 16))
     y, _ = flow_step(x, 0)
     x_, _ = flow_step(y, 0, True)
     print(y.size(), x.size())
-    print(float(torch.max(torch.abs(x - x_))))
+    print("flow_step (forward, reverse) delta", float(torch.max(torch.abs(x - x_))))
 
 
 def test_flow_net():
-    flow_net = FlowNet(12, 128, 4).cuda()
-    x = torch.Tensor(np.random.rand(4, 12, 16, 16)).cuda()
+    flow_net = FlowNet(12, 128, 4)
+    x = torch.Tensor(np.random.rand(4, 12, 16, 16))
     y, logdet = flow_net(x, 0.0, reverse=False)
-    x_, _ = flow_net(x, None, reverse=True)
     print(y.size())
+    x_ = flow_net(y, None, reverse=True)
     print(x_.size())
 
 
