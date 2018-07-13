@@ -68,7 +68,7 @@ class FlowStep(nn.Module):
             scale = F.sigmoid(h[:, 1::2, :, :] + 2.)
             z2 += shift
             z2 *= scale
-            logdet += torch.sum(torch.log(scale))
+            logdet = torch.log(scale).sum(1).sum(1).sum(1) + logdet
         z = torch.cat((z1, z2), dim=1)
         return z, logdet
     
@@ -85,7 +85,7 @@ class FlowStep(nn.Module):
             scale = F.sigmoid(h[:, 1::2, :, :] + 2.)
             z2 /= scale
             z2 -= shift
-            logdet -= torch.sum(torch.log(scale))
+            logdet = -torch.log(scale).sum(1).sum(1).sum(1) + logdet
         z = torch.cat((z1, z2), dim=1)
         z, logdet = FlowStep.FlowPermutation[self.flow_permutation](self, z, logdet, True)
         z, logdet = self.actnorm(z, logdet=logdet, reverse=True)
@@ -141,7 +141,7 @@ class FlowNet(nn.Module):
 class Glow(nn.Module):
     def __init__(self, hparams):
         super().__init__()
-        self.flow = FlowNet(in_channels=hparams.Glow.in_channels,
+        self.flow = FlowNet(in_channels=hparams.Glow.in_channels * 4,
                             hidden_channels=hparams.Glow.hidden_channels,
                             flow_steps=hparams.Glow.flow_steps,
                             actnorm_scale=hparams.Glow.actnorm_scale,
@@ -149,6 +149,7 @@ class Glow(nn.Module):
                             flow_permutation=hparams.Glow.flow_permutation,
                             LU_decomposed=hparams.Glow.LU_decomposed,
                             flow_coupling=hparams.Glow.flow_coupling)
+        self.y_classes = hparams.Data.y_classes
         # for prior
         self.learn_top = None
         if hparams.Glow.learn_top:
@@ -158,16 +159,17 @@ class Glow(nn.Module):
         if hparams.Glow.y_condition:
             C = self.flow.final_z_channels
             self.project_ycond = modules.LinearZeros(hparams.Glow.y_classes, 2 * C)
+        self.num_bits = None
+        self.z_shape = None
 
-    def prior(self, z, y_onehot):
-        assert z.size(1) == self.flow.final_z_channels
-        C = self.flow.final_z_channels
-        H, W = z.size(2), z.size(3)
+    def prior(self, y_onehot):
+        assert self.z_shape[1] == self.flow.final_z_channels
+        B, C, H, W = self.z_shape[0], self.z_shape[1], self.z_shape[2], self.z_shape[3]
         h = torch.zeros([y_onehot.size(0), C * 2, H, W])
         if self.learn_top is not None:
             h = self.learn_top(h)
         if self.project_ycond:
-            yp = self.project_ycond(y_onehot).view(z.size(0), C * 2, 1, 1)
+            yp = self.project_ycond(y_onehot).view(B, C * 2, 1, 1)
             h += yp
         mean = h[:, :C, :, :]
         logs = h[:, C:, :, :]
@@ -180,14 +182,42 @@ class Glow(nn.Module):
             return self.reverse_flow(y, eps_std)
 
     def normal_flow(self, x, y):
-        return x
+        bsz = x.size(0)
+        self.num_bits = int(np.prod([int(x.size(i)) for i in range(1, len(x.size()))]))
+        y_onehot = torch.zeros(bsz, self.y_classes).scatter_(1, y, 1)
+        objective = torch.zeros_like(x[:, 0, 0, 0])
+        z = x + torch.normal(mean=torch.zeros_like(x),
+                             std=torch.ones_like(x) * (1. / 256.))
+        objective += float( -np.log(256.) * self.num_bits )
+        # encode
+        z = modules.squeeze2d(z, 2)
+        z, objective = self.flow(z, objective)
+        self.z_shape = [int(d) for d in z.size()]
+        # prior
+        mean, logs = self.prior(y_onehot)
+        objective += modules.GaussianDiag.logp(mean, logs, z)
+
+        return z, objective
 
     def reverse_flow(self, y, eps_std):
-        return y
+        bsz = y.size(0)
+        y_onehot = torch.zeros(bsz, self.y_classes).scatter_(1, y, 1)
+        with torch.no_grad():
+            mean, logs = self.prior(y_onehot)
+            z = modules.GaussianDiag.sample(mean, logs, eps_std)
+            z = self.flow(z, eps_std=eps_std, reverse=True)
+            x = modules.unsqueeze2d(z, 2)  # 8x8x12 -> 16x16x3
+        return x
+
+    def loss_generative(self, objective):
+        # Generative loss
+        nobj = - objective
+        bits_x = nobj / float((np.log(2.) * self.num_bits))  # bits per subpixel
+        return bits_x
 
 
 def test_flow_step():
-    flow_step = FlowStep(64, 128, flow_permutation="invconv1x1")
+    flow_step = FlowStep(64, 128, flow_permutation="invconv1x1", flow_coupling="affine")
     x = torch.Tensor(np.random.rand(4, 64, 16, 16))
     y, _ = flow_step(x, 0)
     x_, _ = flow_step(y, 0, True)
@@ -205,6 +235,17 @@ def test_flow_net():
     print(x_.size())
 
 
+def test_glow():
+    from config import JsonConfig
+    hparams = JsonConfig("hparam.json")
+    glow = Glow(hparams)
+    x = torch.Tensor(np.random.rand(4, 3, 32, 32))
+    y = torch.LongTensor([[1], [2], [3], [4]])
+    z, objective = glow(x, y)
+    print(z.size(), objective.size())
+
+
 if __name__ == "__main__":
     test_flow_step()
     test_flow_net()
+    test_glow()
