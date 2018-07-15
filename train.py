@@ -126,7 +126,10 @@ class Trainer(object):
                 if self.global_step % self.plot_gaps == 0:
                     img = self.graph(z=z, y_onehot=y_onehot, reverse=True)
                     img = torch.clamp(img, min=0, max=1.0)
-                    y_pred = F.sigmoid(y_logits)
+                    if "y_onehot" in batch:
+                        y_pred = F.sigmoid(y_logits)
+                    else:
+                        y_pred = torch.zeros_like(y_logits).scatter_(1, torch.argmax(F.softmax(y_logits, dim=1), dim=1, keepdim=True), 1)
                     y_true = y_onehot
                     for bi in range(min([len(img), 4])):
                         self.writer.add_image("0_reverse/{}".format(bi), torch.cat((img[bi], batch["x"][bi]), dim=1), self.global_step)
@@ -138,7 +141,7 @@ class Trainer(object):
                 # inference
                 if hasattr(self, "inference_gap"):
                     if self.global_step % self.inference_gap == 0:
-                        img = self.graph(z=None, y_onehot=y_onehot, reverse=True)
+                        img = self.graph(z=None, y_onehot=y_onehot, eps_std=0.5, reverse=True)
                         img = torch.clamp(img, min=0, max=1.0)
                         for bi in range(min([len(img), 4])):
                             self.writer.add_image("2_sample/{}".format(bi), img[bi], self.global_step)

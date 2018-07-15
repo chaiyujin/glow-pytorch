@@ -4,8 +4,8 @@
     },
     "Glow" : {
         "in_channels": 1,
-        "hidden_channels": 128,
-        "flow_depth": 8,
+        "hidden_channels": 96,
+        "flow_depth": 2,
         "flow_levels": 3,
         "actnorm_scale": 1.0,
         "logscale_factor": 3.0,
@@ -40,7 +40,7 @@
         "data": "cuda:0"
     },
     "Train": {
-        "batch_size": 8,
+        "batch_size": 64,
         "num_batches": 1000000,
         "with_attention_guide": true,
         "max_grad_clip": 5,
