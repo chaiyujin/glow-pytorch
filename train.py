@@ -61,6 +61,8 @@ class Trainer(object):
         self.plot_gaps = 50
         self.inference_gap = 50
         
+        self.y_classes = hparams.Glow.y_classes
+        
     def train(self):
         # set to training state
         self.graph.train()
@@ -81,11 +83,19 @@ class Trainer(object):
                 for k in batch:
                     batch[k] = batch[k].to(self.data_device)
                 # forward phase
-                z, objective, y_logits = self.graph(x=batch["x"], y_onehot=batch["y"])
+                if "y_onehot" in batch:
+                    y_onehot = batch["y_onehot"]
+                else:
+                    y_onehot = torch.zeros(self.batch_size, self.y_classes).to(batch["y"].device)
+                    y_onehot = y_onehot.scatter_(1, batch["y"].unsqueeze(-1), 1)
+                z, objective, y_logits = self.graph(x=batch["x"], y_onehot=y_onehot)
                 
                 # loss
                 loss_generative = Glow.loss_generative(batch["x"].size(), objective)
-                loss_yclasses = Glow.loss_yclass(y_logits, batch["y"]) * self.weight_y
+                if "y_onehot" in batch:
+                    loss_ylcasses = Glow.loss_multi_classes(y_logits, batch["y_onehot"]) * self.weight_y
+                else:
+                    loss_yclasses = Glow.loss_class(y_logits, batch["y"]) * self.weight_y
                 if self.global_step % self.scalar_log_gaps == 0:
                     self.writer.add_scalar("loss/loss_generative", loss_generative, self.global_step)
                     self.writer.add_scalar("loss/loss_yclasses", loss_yclasses, self.global_step)
@@ -114,10 +124,10 @@ class Trainer(object):
                          is_best=True,
                          max_checkpoints=self.max_checkpoints)
                 if self.global_step % self.plot_gaps == 0:
-                    img = self.graph(z=z, y_onehot=batch["y"], reverse=True)
+                    img = self.graph(z=z, y_onehot=y_onehot, reverse=True)
                     img = torch.clamp(img, min=0, max=1.0)
                     y_pred = F.sigmoid(y_logits)
-                    y_true = batch["y"]
+                    y_true = y_onehot
                     for bi in range(min([len(img), 4])):
                         self.writer.add_image("0_reverse/{}".format(bi), torch.cat((img[bi], batch["x"][bi]), dim=1), self.global_step)
                         self.writer.add_image("1_prob/{}".format(bi),
@@ -128,7 +138,7 @@ class Trainer(object):
                 # inference
                 if hasattr(self, "inference_gap"):
                     if self.global_step % self.inference_gap == 0:
-                        img = self.graph(z=None, y_onehot=batch["y"], reverse=True)
+                        img = self.graph(z=None, y_onehot=y_onehot, reverse=True)
                         img = torch.clamp(img, min=0, max=1.0)
                         for bi in range(min([len(img), 4])):
                             self.writer.add_image("2_sample/{}".format(bi), img[bi], self.global_step)

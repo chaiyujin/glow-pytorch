@@ -145,6 +145,7 @@ class FlowNet(nn.Module):
 
 class Glow(nn.Module):
     bce = nn.BCEWithLogitsLoss()
+    ce = nn.CrossEntropyLoss()
     def __init__(self, hparams):
         super().__init__()
         self.flow = FlowNet(in_channels=hparams.Glow.in_channels * 4,
@@ -185,7 +186,6 @@ class Glow(nn.Module):
         return mean, logs
 
     def forward(self, x=None, y_onehot=None, z=None, eps_std=None, reverse=False):
-        y_onehot = y_onehot.float()
         assert y_onehot.size(-1) == self.y_classes, (
             "y_onehot has {}, however, y_classes == {}".format(int(y_onehot.size(-1)), self.y_classes))
         if not reverse:
@@ -233,11 +233,18 @@ class Glow(nn.Module):
         return torch.mean(bits_x)
 
     @staticmethod
-    def loss_yclass(y_logits, y_onehot):
+    def loss_multi_classes(y_logits, y_onehot):
         if y_logits is None:
             return 0
         else:
             return Glow.bce(y_logits, y_onehot.float())
+
+    @staticmethod
+    def loss_class(y_logits, y):
+        if y_logits is None:
+            return 0
+        else:
+            return Glow.ce(y_logits, y.long())
 
 
 # def test_flow_step():
