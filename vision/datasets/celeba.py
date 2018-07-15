@@ -58,7 +58,7 @@ def _find_images_and_annotation(root_dir):
 class CelebADataset(Dataset):
     def __init__(self, root_dir, transform=transforms.Compose([
                                            transforms.CenterCrop(160),
-                                           transforms.Resize(128),
+                                           transforms.Resize(32),
                                            transforms.ToTensor()])):
         super().__init__()
         dicts, attrs = _find_images_and_annotation(root_dir)
@@ -88,5 +88,6 @@ if __name__ == "__main__":
     d = celeba[0]
     print(d["x"].size())
     img = d["x"].permute(1, 2, 0).contiguous().numpy()
+    print(np.min(img), np.max(img))
     cv2.imshow("img", img)
     cv2.waitKey()

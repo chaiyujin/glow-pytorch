@@ -34,8 +34,8 @@ class _ActNorm(nn.Module):
         with torch.no_grad():
             input = input.transpose(1, -1).contiguous().view(-1, self.num_features)
             mean = torch.mean(input, dim=0, keepdim=False) * -1.0  # reverse
-            var  = torch.mean(input ** 2, dim=0, keepdim=False)
-            logs = torch.log(self.scale/(torch.sqrt(var)+1e-6)) / self.logscale_factor
+            var  = torch.mean((input+mean) ** 2, dim=0, keepdim=False)
+            logs = torch.log(self.scale/(torch.sqrt(var)+1e-8))
             self.bias.data.copy_(mean.data)
             self.logs.data.copy_(logs.data)
             self.inited = True
@@ -47,7 +47,7 @@ class _ActNorm(nn.Module):
             return input - self.bias
 
     def _scale(self, input, logdet=None, reverse=False):
-        logs = self.logs * self.logscale_factor
+        logs = self.logs
         if not reverse:
             input = input * torch.exp(logs)
         else:
@@ -69,7 +69,7 @@ class _ActNorm(nn.Module):
         self.logdet_factor = float(np.prod([int(input_size[i]) for i in range(2, len(input_size))]))
         
         # transpose feature to last dim
-        input = input.transpose(1, -1).contiguous()
+        input = input.permute(0, 2, 3, 1).contiguous()
         input_size = input.size()  # record current shape
         input = input.view(-1, self.num_features)
         if not reverse:
@@ -81,7 +81,7 @@ class _ActNorm(nn.Module):
             input, logdet = self._scale(input, logdet, reverse)
             input = self._center(input, reverse)
         # reshape and transpose back
-        input = input.view(*input_size).transpose(-1, 1).contiguous()
+        input = input.view(*input_size).permute(0, 3, 1, 2).contiguous()
         return input, logdet
 
 
@@ -203,7 +203,7 @@ class InvertibleConv1x1(nn.Module):
         if not LU_decomposed:
             w_shape = [num_channels, num_channels]
             self.w_shape = w_shape
-            self.logdet_factor = w_shape[-1] * w_shape[-2]
+            self.logdet_factor = None
             # Sample a random orthogonal matrix:
             w_init = np.linalg.qr(np.random.randn(*w_shape))[0].astype('float32')
             self.register_parameter("weight", nn.Parameter(torch.Tensor(w_init)))
@@ -211,7 +211,9 @@ class InvertibleConv1x1(nn.Module):
             raise NotImplementedError()
 
     def forward(self, input, logdet=None, reverse=False):
+        self.logdet_factor = float(input.size(-1) * input.size(-2))
         dlogdet = torch.log(torch.abs(torch.det(self.weight))) * self.logdet_factor
+        # print("invconv", dlogdet, dlogdet.size(), self.logdet_factor)
         if not reverse:
             weight = self.weight.view(self.w_shape[0], self.w_shape[1], 1, 1)
             z = F.conv2d(input, weight)
@@ -233,7 +235,10 @@ class GaussianDiag:
 
     @staticmethod
     def logp(mean, logs, x):
-        return torch.sum(GaussianDiag.logps(mean, logs, x))
+        summed = GaussianDiag.logps(mean, logs, x)
+        while len(summed.size()) > 1:
+            summed = summed.sum(dim=1)
+        return summed
 
     @staticmethod
     def sample(mean, logs, eps_std=None):

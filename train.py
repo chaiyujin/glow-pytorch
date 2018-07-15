@@ -1,13 +1,15 @@
 import re
 import os
 import torch
+import torch.nn.functional as F
 import datetime
 import numpy as np
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
-from utils import save, load
+from utils import save, load, plot_prob
 from config import JsonConfig
+from models import Glow
 
 
 class Trainer(object):
@@ -32,6 +34,7 @@ class Trainer(object):
         self.max_checkpoints = hparams.Train.max_checkpoints
         self.graph = graph
         self.optim = optim
+        self.weight_y = hparams.Train.weight_y
         # grad operation
         self.max_grad_clip = hparams.Train.max_grad_clip
         self.max_grad_norm = hparams.Train.max_grad_norm
@@ -44,6 +47,7 @@ class Trainer(object):
         self.batch_size = hparams.Train.batch_size
         self.data_loader = DataLoader(dataset,
                                       batch_size=self.batch_size,
+                                      num_workers=8,
                                       shuffle=True,
                                       drop_last=True)
         self.n_epoches = (hparams.Train.num_batches + len(self.data_loader) - 1) // len(self.data_loader)
@@ -53,9 +57,9 @@ class Trainer(object):
         self.loaded_step = loaded_step
 
         # log
-        self.scalar_log_gaps = 50
-        self.plot_gaps = 1000
-        self.inference_gap = 100
+        self.scalar_log_gaps = 25
+        self.plot_gaps = 50
+        self.inference_gap = 50
         
     def train(self):
         # set to training state
@@ -77,12 +81,15 @@ class Trainer(object):
                 for k in batch:
                     batch[k] = batch[k].to(self.data_device)
                 # forward phase
-                z, objective = self.graph(x=batch["x"], y_onehot=batch["y"])
+                z, objective, y_logits = self.graph(x=batch["x"], y_onehot=batch["y"])
                 
                 # loss
-                loss = self.graph.loss_generative(objective)
+                loss_generative = Glow.loss_generative(batch["x"].size(), objective)
+                loss_yclasses = Glow.loss_yclass(y_logits, batch["y"]) * self.weight_y
                 if self.global_step % self.scalar_log_gaps == 0:
-                    self.writer.add_scalar("loss/loss_generative", loss, self.global_step)
+                    self.writer.add_scalar("loss/loss_generative", loss_generative, self.global_step)
+                    self.writer.add_scalar("loss/loss_yclasses", loss_yclasses, self.global_step)
+                loss = loss_generative + loss_yclasses
 
                 # backward
                 self.graph.zero_grad()
@@ -107,14 +114,24 @@ class Trainer(object):
                          is_best=True,
                          max_checkpoints=self.max_checkpoints)
                 if self.global_step % self.plot_gaps == 0:
-                    pass
+                    img = self.graph(z=z, y_onehot=batch["y"], reverse=True)
+                    img = torch.clamp(img, min=0, max=1.0)
+                    y_pred = F.sigmoid(y_logits)
+                    y_true = batch["y"]
+                    for bi in range(min([len(img), 4])):
+                        self.writer.add_image("0_reverse/{}".format(bi), torch.cat((img[bi], batch["x"][bi]), dim=1), self.global_step)
+                        self.writer.add_image("1_prob/{}".format(bi),
+                                              plot_prob([y_pred[bi], y_true[bi]],
+                                                        ["pred", "true"]),
+                                              self.global_step)
 
                 # inference
                 if hasattr(self, "inference_gap"):
                     if self.global_step % self.inference_gap == 0:
-                        img = self.graph(y_onehot=batch["y"], reverse=True)
-                        for bi in range(len(img)):
-                            self.writer.add_image("infer/{}".format(bi), img[bi], self.global_step)
+                        img = self.graph(z=None, y_onehot=batch["y"], reverse=True)
+                        img = torch.clamp(img, min=0, max=1.0)
+                        for bi in range(min([len(img), 4])):
+                            self.writer.add_image("2_sample/{}".format(bi), img[bi], self.global_step)
 
                 # global step
                 self.global_step += 1

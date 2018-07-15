@@ -2,6 +2,10 @@ import os
 import re
 import torch
 from shutil import copyfile
+import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 def _file_at_step(step):
@@ -78,3 +82,88 @@ def load(step_or_path, graph, optim=None, criterion_dict=None, pkg_dir="", devic
 
     print("[Checkpoint]: Load {} successfully".format(save_path))
     return global_step
+
+
+def __save_figure_to_numpy(fig):
+    # save it to a numpy array.
+    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    return data
+
+
+def __to_ndarray_list(tensors, titles):
+    if not isinstance(tensors, list):
+        tensors = [tensors]
+        titles = [titles]
+    assert len(titles) == len(tensors),\
+        "[visualizer]: {} titles are not enough for {} tensors".format(
+            len(titles), len(tensors))
+    for i in range(len(tensors)):
+        if torch.is_tensor(tensors[i]):
+            tensors[i] = tensors[i].cpu().detach().numpy()
+    return tensors, titles
+
+
+def __get_figures(num_tensors, figsize):
+    fig, axes = plt.subplots(num_tensors, 1, figsize=figsize)
+    if not isinstance(axes, np.ndarray):
+        axes = np.asarray([axes])
+    return fig, axes
+
+
+def __make_dir(file_name, plot_dir):
+    if file_name is not None and not os.path.exists(plot_dir):
+        os.makedirs(plot_dir)
+
+
+def __draw(fig, file_name, plot_dir):
+    if file_name is not None:
+        plt.savefig('{}/{}.png'.format(plot_dir, file_name), format='png')
+        plt.close(fig)
+        return None
+    else:
+        fig.tight_layout()
+        fig.canvas.draw()
+        data = __save_figure_to_numpy(fig)
+        plt.close(fig)
+        return data
+
+
+def __get_size_for_spec(tensors):
+    spectrogram = tensors[0]
+    fig_w = np.min([int(np.ceil(spectrogram.shape[1] / 10.0)), 10])
+    fig_w = np.max([fig_w, 3])
+    fig_h = np.max([3 * len(tensors), 3])
+    return (fig_w, fig_h)
+
+
+def __get_aspect(spectrogram):
+    fig_w = np.min([int(np.ceil(spectrogram.shape[1] / 10.0)), 10])
+    fig_w = np.max([fig_w, 3])
+    aspect = 3.0 / fig_w
+    if spectrogram.shape[1] > 50:
+        aspect = aspect * spectrogram.shape[1] / spectrogram.shape[0]
+    else:
+        aspect = aspect * spectrogram.shape[1] / (spectrogram.shape[0])
+    return aspect
+
+
+def plot_prob(done, title="", file_name=None, plot_dir=None):
+    __make_dir(file_name, plot_dir)
+
+    done, title = __to_ndarray_list(done, title)
+    for i in range(len(done)):
+        done[i] = np.reshape(done[i], (-1, done[i].shape[-1]))
+    figsize = (5, 5 * len(done))
+    fig, axes = __get_figures(len(done), figsize)
+    for ax, d, t in zip(axes, done, title):
+        im = ax.imshow(d, vmin=0, vmax=1, cmap="Blues", aspect=d.shape[1]/d.shape[0])
+        ax.set_title(t)
+        ax.set_yticks(np.arange(d.shape[0]))
+        lables = ["Frame{}".format(i+1) for i in range(d.shape[0])]
+        ax.set_yticklabels(lables)
+        ax.set_yticks(np.arange(d.shape[0])-.5, minor=True)
+        ax.grid(which="minor", color="g", linestyle='-.', linewidth=1)
+        ax.invert_yaxis()
+    return __draw(fig, file_name, plot_dir)
+    

@@ -93,7 +93,8 @@ class FlowStep(nn.Module):
 
 
 class FlowNet(nn.Module):
-    def __init__(self, in_channels, hidden_channels, flow_steps,
+    def __init__(self, in_channels, hidden_channels,
+                       flow_depth, flow_levels,
                        actnorm_scale=1.0, logscale_factor=3.0,
                        flow_permutation="invconv1x1",
                        LU_decomposed=False,
@@ -101,16 +102,19 @@ class FlowNet(nn.Module):
         super().__init__()
         self.flow_steps = nn.ModuleList()
         self.flow_pools = nn.ModuleList()
-        for i in range(flow_steps):
-            self.flow_steps.append(FlowStep(
-                in_channels=in_channels,
-                hidden_channels=hidden_channels,
-                actnorm_scale=actnorm_scale,
-                logscale_factor=logscale_factor,
-                flow_permutation=flow_permutation,
-                LU_decomposed=LU_decomposed,
-                flow_coupling=flow_coupling))
-            if i < flow_steps - 1:
+        self.flow_depth = flow_depth
+        self.flow_levels = flow_levels
+        for i in range(flow_levels):
+            for _ in range(flow_depth):
+                self.flow_steps.append(FlowStep(
+                    in_channels=in_channels,
+                    hidden_channels=hidden_channels,
+                    actnorm_scale=actnorm_scale,
+                    logscale_factor=logscale_factor,
+                    flow_permutation=flow_permutation,
+                    LU_decomposed=LU_decomposed,
+                    flow_coupling=flow_coupling))
+            if i < flow_levels - 1:
                 self.flow_pools.append(modules.Split2d(
                     num_channels=in_channels))
             in_channels *= 2
@@ -123,41 +127,47 @@ class FlowNet(nn.Module):
             return self.decode(input, eps_std)
 
     def encode(self, z, objective=0.0):
-        for i in range(len(self.flow_steps)):
-            z, objective = self.flow_steps[i](z, objective, reverse=False)
+        for i in range(self.flow_levels):
+            for j in range(i * self.flow_depth, (i + 1) * self.flow_depth):
+                z, objective = self.flow_steps[j](z, objective, reverse=False)
             if i < len(self.flow_pools):
                 z, objective = self.flow_pools[i](z, objective, reverse=False)
         return z, objective
 
     def decode(self, z, eps_std=None):
-        for i in reversed(range(len(self.flow_steps))):
+        for i in reversed(range(self.flow_levels)):
             if i < len(self.flow_pools):
                 z = self.flow_pools[i](z, None, eps_std=eps_std, reverse=True)
-            z, _ = self.flow_steps[i](z, None, reverse=True)
+            for j in reversed(range(i * self.flow_depth, (i + 1) * self.flow_depth)):
+                z, _ = self.flow_steps[j](z, None, reverse=True)
         return z
 
 
 class Glow(nn.Module):
+    bce = nn.BCEWithLogitsLoss()
     def __init__(self, hparams):
         super().__init__()
         self.flow = FlowNet(in_channels=hparams.Glow.in_channels * 4,
                             hidden_channels=hparams.Glow.hidden_channels,
-                            flow_steps=hparams.Glow.flow_steps,
+                            flow_depth=hparams.Glow.flow_depth,
+                            flow_levels=hparams.Glow.flow_levels,
                             actnorm_scale=hparams.Glow.actnorm_scale,
                             logscale_factor=hparams.Glow.logscale_factor,
                             flow_permutation=hparams.Glow.flow_permutation,
                             LU_decomposed=hparams.Glow.LU_decomposed,
                             flow_coupling=hparams.Glow.flow_coupling)
-        self.y_classes = hparams.Data.y_classes
+        self.y_classes = hparams.Glow.y_classes
         # for prior
         self.learn_top = None
         if hparams.Glow.learn_top:
             C = self.flow.final_z_channels
             self.learn_top = modules.Conv2dZeros(C * 2, C * 2)
         self.project_ycond = None
+        self.project_class = None
         if hparams.Glow.y_condition:
             C = self.flow.final_z_channels
             self.project_ycond = modules.LinearZeros(hparams.Glow.y_classes, 2 * C)
+            self.project_class = modules.LinearZeros(self.flow.final_z_channels, hparams.Glow.y_classes)
         self.num_bits = None
         self.z_shape = None
 
@@ -174,13 +184,14 @@ class Glow(nn.Module):
         logs = h[:, C:, :, :]
         return mean, logs
 
-    def forward(self, x=None, y_onehot=None, eps_std=None, reverse=False):
+    def forward(self, x=None, y_onehot=None, z=None, eps_std=None, reverse=False):
+        y_onehot = y_onehot.float()
         assert y_onehot.size(-1) == self.y_classes, (
             "y_onehot has {}, however, y_classes == {}".format(int(y_onehot.size(-1)), self.y_classes))
         if not reverse:
             return self.normal_flow(x, y_onehot)
         else:
-            return self.reverse_flow(y_onehot, eps_std)
+            return self.reverse_flow(z, y_onehot, eps_std)
 
     def normal_flow(self, x, y_onehot):
         bsz = x.size(0)
@@ -197,53 +208,68 @@ class Glow(nn.Module):
         mean, logs = self.prior(y_onehot)
         objective += modules.GaussianDiag.logp(mean, logs, z)
 
-        return z, objective
+        if self.project_class is not None:
+            y_logits = self.project_class(z.mean(2).mean(2))
+        else:
+            y_logits = None
 
-    def reverse_flow(self, y_onehot, eps_std):
+        return z, objective, y_logits
+
+    def reverse_flow(self, z, y_onehot, eps_std):
         with torch.no_grad():
             mean, logs = self.prior(y_onehot)
-            z = modules.GaussianDiag.sample(mean, logs, eps_std)
+            if z is None:
+                z = modules.GaussianDiag.sample(mean, logs, eps_std)
             z = self.flow(z, eps_std=eps_std, reverse=True)
             x = modules.unsqueeze2d(z, 2)  # 8x8x12 -> 16x16x3
         return x
 
-    def loss_generative(self, objective):
+    @staticmethod
+    def loss_generative(input_size, objective):
         # Generative loss
+        num_bits = int(np.prod([int(input_size[i]) for i in range(1, len(input_size))]))
         nobj = - objective
-        bits_x = nobj / float((np.log(2.) * self.num_bits))  # bits per subpixel
+        bits_x = nobj / float(np.log(2.) * num_bits)  # bits per subpixel
         return torch.mean(bits_x)
 
-
-def test_flow_step():
-    flow_step = FlowStep(64, 128, flow_permutation="invconv1x1", flow_coupling="affine")
-    x = torch.Tensor(np.random.rand(4, 64, 16, 16))
-    y, _ = flow_step(x, 0)
-    x_, _ = flow_step(y, 0, True)
-    print(y.size(), x.size())
-    print("flow_step (forward, reverse) delta", float(torch.max(torch.abs(x - x_))))
+    @staticmethod
+    def loss_yclass(y_logits, y_onehot):
+        if y_logits is None:
+            return 0
+        else:
+            return Glow.bce(y_logits, y_onehot.float())
 
 
-def test_flow_net():
-    flow_net = FlowNet(12, 128, 4)
-    print(flow_net.final_z_channels)
-    x = torch.Tensor(np.random.rand(4, 12, 16, 16))
-    y, logdet = flow_net(x, 0.0, reverse=False)
-    print(y.size())
-    x_ = flow_net(y, None, reverse=True)
-    print(x_.size())
+# def test_flow_step():
+#     flow_step = FlowStep(64, 128, flow_permutation="invconv1x1", flow_coupling="affine")
+#     x = torch.Tensor(np.random.rand(4, 64, 16, 16))
+#     y, _ = flow_step(x, 0)
+#     x_, _ = flow_step(y, 0, True)
+#     print(y.size(), x.size())
+#     print("flow_step (forward, reverse) delta", float(torch.max(torch.abs(x - x_))))
 
 
-def test_glow():
-    from config import JsonConfig
-    hparams = JsonConfig("hparam.json")
-    glow = Glow(hparams)
-    x = torch.Tensor(np.random.rand(4, 3, 32, 32))
-    y = torch.LongTensor([[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0]])
-    z, objective = glow(x, y)
-    print(z.size(), objective.size())
+# def test_flow_net():
+#     flow_net = FlowNet(12, 128, 4)
+#     print(flow_net.final_z_channels)
+#     x = torch.Tensor(np.random.rand(4, 12, 16, 16))
+#     y, logdet = flow_net(x, 0.0, reverse=False)
+#     print(y.size())
+#     x_ = flow_net(y, None, reverse=True)
+#     print(x_.size())
 
 
-if __name__ == "__main__":
-    test_flow_step()
-    test_flow_net()
-    test_glow()
+# def test_glow():
+#     from config import JsonConfig
+#     hparams = JsonConfig("hparam.json")
+#     glow = Glow(hparams)
+#     x = torch.Tensor(np.random.rand(4, 3, 32, 32))
+#     y = torch.LongTensor([[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0]])
+#     z, objective = glow(x, y)
+#     print(z.size(), objective.size())
+
+
+# if __name__ == "__main__":
+#     test_flow_step()
+#     test_flow_net()
+#     test_glow()
