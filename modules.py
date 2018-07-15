@@ -229,7 +229,7 @@ class InvertibleConv1x1(nn.Module):
 class GaussianDiag:
     @staticmethod
     def logps(mean, logs, x):
-        return -0.5 * (logs * np.log(2 * np.pi) + 2. + (x - mean) ** 2 / torch.exp(2. * logs))
+        return -0.5 * (float(np.log(2 * np.pi)) + logs * 2. + (x - mean) ** 2 / torch.exp(2. * logs))
 
     @staticmethod
     def logp(mean, logs, x):

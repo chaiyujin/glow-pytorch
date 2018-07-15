@@ -131,7 +131,6 @@ class FlowNet(nn.Module):
 
     def decode(self, z, eps_std=None):
         for i in reversed(range(len(self.flow_steps))):
-            print(i, z.size())
             if i < len(self.flow_pools):
                 z = self.flow_pools[i](z, None, eps_std=eps_std, reverse=True)
             z, _ = self.flow_steps[i](z, None, reverse=True)
@@ -165,7 +164,7 @@ class Glow(nn.Module):
     def prior(self, y_onehot):
         assert self.z_shape[1] == self.flow.final_z_channels
         B, C, H, W = self.z_shape[0], self.z_shape[1], self.z_shape[2], self.z_shape[3]
-        h = torch.zeros([y_onehot.size(0), C * 2, H, W])
+        h = torch.zeros([y_onehot.size(0), C * 2, H, W]).to(y_onehot.device)
         if self.learn_top is not None:
             h = self.learn_top(h)
         if self.project_ycond:
@@ -175,16 +174,17 @@ class Glow(nn.Module):
         logs = h[:, C:, :, :]
         return mean, logs
 
-    def forward(self, x, y, eps_std=None, reverse=False):
+    def forward(self, x=None, y_onehot=None, eps_std=None, reverse=False):
+        assert y_onehot.size(-1) == self.y_classes, (
+            "y_onehot has {}, however, y_classes == {}".format(int(y_onehot.size(-1)), self.y_classes))
         if not reverse:
-            return self.normal_flow(x, y)
+            return self.normal_flow(x, y_onehot)
         else:
-            return self.reverse_flow(y, eps_std)
+            return self.reverse_flow(y_onehot, eps_std)
 
-    def normal_flow(self, x, y):
+    def normal_flow(self, x, y_onehot):
         bsz = x.size(0)
         self.num_bits = int(np.prod([int(x.size(i)) for i in range(1, len(x.size()))]))
-        y_onehot = torch.zeros(bsz, self.y_classes).scatter_(1, y, 1)
         objective = torch.zeros_like(x[:, 0, 0, 0])
         z = x + torch.normal(mean=torch.zeros_like(x),
                              std=torch.ones_like(x) * (1. / 256.))
@@ -199,9 +199,7 @@ class Glow(nn.Module):
 
         return z, objective
 
-    def reverse_flow(self, y, eps_std):
-        bsz = y.size(0)
-        y_onehot = torch.zeros(bsz, self.y_classes).scatter_(1, y, 1)
+    def reverse_flow(self, y_onehot, eps_std):
         with torch.no_grad():
             mean, logs = self.prior(y_onehot)
             z = modules.GaussianDiag.sample(mean, logs, eps_std)
@@ -213,7 +211,7 @@ class Glow(nn.Module):
         # Generative loss
         nobj = - objective
         bits_x = nobj / float((np.log(2.) * self.num_bits))  # bits per subpixel
-        return bits_x
+        return torch.mean(bits_x)
 
 
 def test_flow_step():
@@ -240,7 +238,7 @@ def test_glow():
     hparams = JsonConfig("hparam.json")
     glow = Glow(hparams)
     x = torch.Tensor(np.random.rand(4, 3, 32, 32))
-    y = torch.LongTensor([[1], [2], [3], [4]])
+    y = torch.LongTensor([[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0]])
     z, objective = glow(x, y)
     print(z.size(), objective.size())
 
