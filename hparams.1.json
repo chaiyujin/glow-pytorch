@@ -3,16 +3,16 @@
         "log_root": "results/"
     },
     "Glow" : {
-        "in_channels": 3,
+        "image_shape": [64, 64, 3],
         "hidden_channels": 512,
-        "flow_depth": 32,
-        "flow_levels": 3,
+        "K": 32,
+        "L": 3,
         "actnorm_scale": 1.0,
         "logscale_factor": 3.0,
-        "flow_permutation": "invconv1x1",
+        "flow_permutation": "invconv",
         "flow_coupling": "additive",
         "LU_decomposed": false,
-        "learn_top": false,
+        "learn_top": true,
         "y_condition": true,
         "y_classes": 40
     },
@@ -54,5 +54,8 @@
         "inference_gap": 1000,
         "warm_start": "",
         "weight_y": 0.5
+    },
+    "Infer": {
+        "pre_trained": "./results/trained/trained.pkg"
     }
 }
