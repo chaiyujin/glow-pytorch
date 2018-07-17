@@ -121,6 +121,8 @@ def load(step_or_path, graph, optim=None, criterion_dict=None, pkg_dir="", devic
         for k in criterion_dict:
             criterion_dict[k].load_state_dict(state["criterion"][k])
 
+    graph.set_actnorm_init(inited=True)
+
     print("[Checkpoint]: Load {} successfully".format(save_path))
     return global_step
 
@@ -207,4 +209,3 @@ def plot_prob(done, title="", file_name=None, plot_dir=None):
         ax.grid(which="minor", color="g", linestyle='-.', linewidth=1)
         ax.invert_yaxis()
     return __draw(fig, file_name, plot_dir)
-    

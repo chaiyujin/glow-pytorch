@@ -84,10 +84,6 @@ def build(hparams, is_training):
                 data_gpu = devices[0]
             # move to first
             graph = graph.cuda(device=devices[0])
-            if is_training and len(devices) > 1:
-                # multiple gpu training
-                graph = torch.nn.DataParallel(graph, device_ids=devices,
-                                              output_device=data_gpu)
             if is_training and pre_trained is not None:
                 # note that it is possible necessary to move optim
                 if hasattr(optim, "state"):
@@ -99,7 +95,7 @@ def build(hparams, is_training):
                                 D[k] = D[k].cuda(device)
                     move_to(optim.state, devices[0])
             print("[Builder]: Use cuda {} to train, use {} to load data and get loss.".format(devices, data_gpu))
-            
+
     return {
         "graph": graph,
         "optim": optim,

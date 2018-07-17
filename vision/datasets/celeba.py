@@ -75,7 +75,7 @@ class CelebADataset(Dataset):
             image = self.transform(image)
         return {
             "x": image,
-            "y_onehot": np.asarray(attr, dtype=np.long)
+            "y_onehot": np.asarray(attr, dtype=np.float32)
         }
 
     def __len__(self):

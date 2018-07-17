@@ -10,18 +10,21 @@ from torch.utils.data import DataLoader
 from .utils import save, load, plot_prob
 from .config import JsonConfig
 from .models import Glow
+from . import thops
 
 
 class Trainer(object):
     def __init__(self, graph, optim, lrschedule, loaded_step,
-                       devices, data_device,
-                       dataset, hparams):
+                 devices, data_device,
+                 dataset, hparams):
         if isinstance(hparams, str):
             hparams = JsonConfig(hparams)
         # set members
         # append date info
         date = str(datetime.datetime.now())
-        date = date[:date.rfind(":")].replace("-", "").replace(":", "").replace(" ", "_")
+        date = date[:date.rfind(":")].replace("-", "")\
+                                     .replace(":", "")\
+                                     .replace(" ", "_")
         self.log_dir = os.path.join(hparams.Dir.log_root, "log_" + date)
         self.checkpoints_dir = os.path.join(self.log_dir, "checkpoints")
         if not os.path.exists(self.log_dir):
@@ -49,7 +52,8 @@ class Trainer(object):
                                       num_workers=8,
                                       shuffle=True,
                                       drop_last=True)
-        self.n_epoches = (hparams.Train.num_batches + len(self.data_loader) - 1) // len(self.data_loader)
+        self.n_epoches = (hparams.Train.num_batches+len(self.data_loader)-1)
+        self.n_epoches = self.n_epoches // len(self.data_loader)
         self.global_step = 0
         # lr schedule
         self.lrschedule = lrschedule
@@ -58,15 +62,15 @@ class Trainer(object):
         self.y_classes = hparams.Glow.y_classes
         self.y_condition = hparams.Glow.y_condition
         self.y_criterion = hparams.Criterion.y_condition
-        assert hparams.Criterion.y_condition in ["BCE", "CE"]
+        assert self.y_criterion in ["multi-classes", "single-class"]
 
         # log relative
         # tensorboard
         self.writer = SummaryWriter(log_dir=self.log_dir)
-        self.scalar_log_gaps = 25
-        self.plot_gaps = 50
-        self.inference_gap = 50
-                
+        self.scalar_log_gaps = hparams.Train.scalar_log_gap
+        self.plot_gaps = hparams.Train.plot_gap
+        self.inference_gap = hparams.Train.inference_gap
+
     def train(self):
         # set to training state
         self.graph.train()
@@ -77,7 +81,8 @@ class Trainer(object):
             progress = tqdm(self.data_loader)
             for i_batch, batch in enumerate(progress):
                 # update learning rate
-                lr = self.lrschedule["func"](global_step=self.global_step, **self.lrschedule["args"])
+                lr = self.lrschedule["func"](global_step=self.global_step,
+                                             **self.lrschedule["args"])
                 for param_group in self.optim.param_groups:
                     param_group['lr'] = lr
                 self.optim.zero_grad()
@@ -90,26 +95,32 @@ class Trainer(object):
                 y = None
                 y_onehot = None
                 if self.y_condition:
-                    if self.y_criterion == "BCE":
-                        assert "y_onehot" in batch, "BCE ask for `y_onehot` (torch.FloatTensor one-hot)"
+                    if self.y_criterion == "multi-classes":
+                        assert "y_onehot" in batch, "multi-classes ask for `y_onehot` (torch.FloatTensor onehot)"
                         y_onehot = batch["y_onehot"]
-                    elif self.y_criterion == "CE":
-                        assert "y" in batch, "CE ask for `y` (torch.LongTensor indexes)"
+                    elif self.y_criterion == "single-class":
+                        assert "y" in batch, "single-class ask for `y` (torch.LongTensor indexes)"
                         y = batch["y"]
-                        y_onehot = torch.zeros(self.batch_size, self.y_classes).to(batch["y"].device)
-                        y_onehot = y_onehot.scatter_(1, batch["y"].unsqueeze(-1), 1)
+                        y_onehot = thops.onehot(y, num_classes=self.y_classes)
 
+                # at first time, initialize ActNorm
+                if self.global_step == 0:
+                    self.graph(x[:self.batch_size // len(self.devices), ...],
+                               y_onehot[:self.batch_size // len(self.devices), ...] if y_onehot is not None else None)
+                # parallel
+                if len(self.devices) > 1 and not hasattr(self.graph, "module"):
+                    print("[Parallel] move to {}".format(self.devices))
+                    self.graph = torch.nn.parallel.DataParallel(self.graph, self.devices, self.devices[0])
                 # forward phase
-                z, logdet, y_logits = self.graph(x=x, y_onehot=y_onehot)
-                
+                z, nll, y_logits = self.graph(x=x, y_onehot=y_onehot)
+
                 # loss
-                loss_generative = Glow.loss_generative(logdet)
+                loss_generative = Glow.loss_generative(nll)
                 loss_classes = 0
                 if self.y_condition:
-                    if self.y_criterion == "BCE":
-                        loss_classes = Glow.loss_multi_classes(y_logits, y_onehot)
-                    elif self.y_criterion == "CE":
-                        loss_classes = Glow.loss_class(y_logits, y)
+                    loss_classes = (Glow.loss_multi_classes(y_logits, y_onehot)
+                                    if self.y_criterion == "multi-classes" else
+                                    Glow.loss_class(y_logits, y))
                 if self.global_step % self.scalar_log_gaps == 0:
                     self.writer.add_scalar("loss/loss_generative", loss_generative, self.global_step)
                     if self.y_condition:
@@ -140,25 +151,24 @@ class Trainer(object):
                          max_checkpoints=self.max_checkpoints)
                 if self.global_step % self.plot_gaps == 0:
                     img = self.graph(z=z, y_onehot=y_onehot, reverse=True)
-                    img = torch.clamp(img, min=0, max=1.0)
+                    # img = torch.clamp(img, min=0, max=1.0)
                     if self.y_condition:
-                        if self.y_criterion == "BCE":
+                        if self.y_criterion == "multi-classes":
                             y_pred = F.sigmoid(y_logits)
-                        elif self.y_criterion == "CE":
-                            y_pred = torch.zeros_like(y_logits).scatter_(1, torch.argmax(F.softmax(y_logits, dim=1), dim=1, keepdim=True), 1)
+                        elif self.y_criterion == "single-class":
+                            y_pred = thops.onehot(torch.argmax(F.softmax(y_logits, dim=1), dim=1, keepdim=True),
+                                                  self.y_classes)
                         y_true = y_onehot
                     for bi in range(min([len(img), 4])):
                         self.writer.add_image("0_reverse/{}".format(bi), torch.cat((img[bi], batch["x"][bi]), dim=1), self.global_step)
                         if self.y_condition:
-                            self.writer.add_image("1_prob/{}".format(bi),
-                                                  plot_prob([y_pred[bi], y_true[bi]], ["pred", "true"]),
-                                                  self.global_step)
+                            self.writer.add_image("1_prob/{}".format(bi), plot_prob([y_pred[bi], y_true[bi]], ["pred", "true"]), self.global_step)
 
                 # inference
                 if hasattr(self, "inference_gap"):
                     if self.global_step % self.inference_gap == 0:
                         img = self.graph(z=None, y_onehot=y_onehot, eps_std=0.5, reverse=True)
-                        img = torch.clamp(img, min=0, max=1.0)
+                        # img = torch.clamp(img, min=0, max=1.0)
                         for bi in range(min([len(img), 4])):
                             self.writer.add_image("2_sample/{}".format(bi), img[bi], self.global_step)
 

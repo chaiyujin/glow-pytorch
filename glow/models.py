@@ -208,7 +208,7 @@ class Glow(nn.Module):
             h = self.learn_top(h)
         if self.hparams.Glow.y_condition:
             assert y_onehot is not None
-            yp = self.project_ycond(y_onehot).view(B, C * 2, 1, 1)
+            yp = self.project_ycond(y_onehot).view(B, C, 1, 1)
             h += yp
         return thops.split_feature(h, "split")
 
@@ -237,8 +237,8 @@ class Glow(nn.Module):
             y_logits = None
 
         # return
-        likelihood = (-objective) / float(np.log(2.) * pixels)
-        return z, likelihood, y_logits
+        nll = (-objective) / float(np.log(2.) * pixels)
+        return z, nll, y_logits
 
     def reverse_flow(self, z, y_onehot, eps_std):
         with torch.no_grad():
@@ -248,10 +248,15 @@ class Glow(nn.Module):
             x = self.flow(z, eps_std=eps_std, reverse=True)
         return x
 
+    def set_actnorm_init(self, inited=True):
+        for name, m in self.named_modules():
+            if (m.__class__.__name__.find("ActNorm") >= 0):
+                m.inited = inited
+
     @staticmethod
-    def loss_generative(likelihood):
+    def loss_generative(nll):
         # Generative loss
-        return torch.mean(likelihood)
+        return torch.mean(nll)
 
     @staticmethod
     def loss_multi_classes(y_logits, y_onehot):

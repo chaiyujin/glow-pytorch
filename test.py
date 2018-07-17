@@ -129,12 +129,17 @@ def test_flow_net():
 def test_glow():
     print("[Test]: Glow")
     from glow.config import JsonConfig
-    glow = models.Glow(JsonConfig("hparams.1.json"))
-    x = torch.Tensor(np.random.rand(4, 3, 64, 64))
-    y_onehot = torch.zeros((4, 40))
+    glow = models.Glow(JsonConfig("hparams_celeba.json"))
+    img = cv2.imread("tsuki.jpeg")
+    img = cv2.resize(img, (64, 64))
+    img = (img / 255.0).astype(np.float32)
+    img = img[:, :, ::-1].transpose(2, 0, 1)
+    x = torch.Tensor([img]*8)
+    y_onehot = torch.zeros((8, 40))
     z, det, y_logits = glow(x=x, y_onehot=y_onehot)
     print(z.size())
     print(det)
+    print(models.Glow.loss_generative(det))
 
 
 if __name__ == "__main__":

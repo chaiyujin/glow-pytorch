@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import scipy.linalg
 from . import thops
 
 
@@ -193,32 +194,68 @@ class Permute2d(nn.Module):
 class InvertibleConv1x1(nn.Module):
     def __init__(self, num_channels, LU_decomposed=False):
         super().__init__()
+        w_shape = [num_channels, num_channels]
+        w_init = np.linalg.qr(np.random.randn(*w_shape))[0].astype(np.float32)
         if not LU_decomposed:
-            w_shape = [num_channels, num_channels]
             # Sample a random orthogonal matrix:
-            w_init = np.linalg.qr(
-                np.random.randn(*w_shape))[0].astype(np.float32)
-            self.register_parameter("weight",
-                                    nn.Parameter(torch.Tensor(w_init)))
+            self.register_parameter("weight", nn.Parameter(torch.Tensor(w_init)))
         else:
-            raise NotImplementedError()
+            np_p, np_l, np_u = scipy.linalg.lu(w_init)
+            np_s = np.diag(np_u)
+            np_sign_s = np.sign(np_s)
+            np_log_s = np.log(np.abs(np_s))
+            np_u = np.triu(np_u, k=1)
+            l_mask = np.tril(np.ones(w_shape, dtype=np.float32), -1)
+            eye = np.eye(*w_shape, dtype=np.float32)
+
+            self.p = torch.Tensor(np_p.astype(np.float32))
+            self.sign_s = torch.Tensor(np_sign_s.astype(np.float32))
+            self.l = nn.Parameter(torch.Tensor(np_l.astype(np.float32)))
+            self.log_s = nn.Parameter(torch.Tensor(np_log_s.astype(np.float32)))
+            self.u = nn.Parameter(torch.Tensor(np_u.astype(np.float32)))
+            self.l_mask = torch.Tensor(l_mask)
+            self.eye = torch.Tensor(eye)
+        self.w_shape = w_shape
+        self.LU = LU_decomposed
+
+    def get_weight(self, input, reverse):
+        w_shape = self.w_shape
+        if not self.LU:
+            pixels = thops.pixels(input)
+            dlogdet = torch.log(torch.abs(torch.det(self.weight))) * pixels
+            if not reverse:
+                weight = self.weight.view(w_shape[0], w_shape[1], 1, 1)
+            else:
+                weight = torch.inverse(self.weight)\
+                              .view(w_shape[0], w_shape[1], 1, 1)
+            return weight, dlogdet
+        else:
+            self.p = self.p.to(input.device)
+            self.sign_s = self.sign_s.to(input.device)
+            self.l_mask = self.l_mask.to(input.device)
+            self.eye = self.eye.to(input.device)
+            l = self.l * self.l_mask + self.eye
+            u = self.u * self.l_mask.transpose(0, 1).contiguous() + torch.diag(self.sign_s * torch.exp(self.log_s))
+            dlogdet = thops.sum(self.log_s) * thops.pixels(input)
+            if not reverse:
+                w = torch.matmul(self.p, torch.matmul(l, u))
+            else:
+                l = l.inverse()
+                u = u.inverse()
+                w = torch.matmul(u, torch.matmul(l, self.p.inverse()))
+            return w.view(w_shape[0], w_shape[1], 1, 1), dlogdet
 
     def forward(self, input, logdet=None, reverse=False):
         """
         log-det = log|abs(|W|)| * pixels
         """
-        w_shape = self.weight.size()
-        pixels = thops.pixels(input)
-        dlogdet = torch.log(torch.abs(torch.det(self.weight))) * pixels
+        weight, dlogdet = self.get_weight(input, reverse)
         if not reverse:
-            weight = self.weight.view(w_shape[0], w_shape[1], 1, 1)
             z = F.conv2d(input, weight)
             if logdet is not None:
                 logdet = logdet + dlogdet
             return z, logdet
         else:
-            weight = torch.inverse(self.weight)\
-                          .view(w_shape[0], w_shape[1], 1, 1)
             z = F.conv2d(input, weight)
             if logdet is not None:
                 logdet = logdet - dlogdet
@@ -235,10 +272,7 @@ class GaussianDiag:
               k = 1 (Independent)
               Var = logs ** 2
         """
-        part0 = logs * 2.
-        part1 = ((x - mean) ** 2) / torch.exp(logs * 2.)
-        part2 = GaussianDiag.Log2PI
-        return -0.5 * (part0 + part1 + part2)
+        return -0.5 * (logs * 2. + ((x - mean) ** 2) / torch.exp(logs * 2.) + GaussianDiag.Log2PI)
 
     @staticmethod
     def logp(mean, logs, x):
@@ -247,11 +281,9 @@ class GaussianDiag:
 
     @staticmethod
     def sample(mean, logs, eps_std=None):
-        mean_size = [int(d) for d in mean.size()]
-        if eps_std is not None:
-            eps = torch.Tensor(np.random.normal(0, eps_std, mean_size)).to(mean.device)
-        else:
-            eps = torch.Tensor(np.random.normal(0, 1, mean_size)).to(mean.device)
+        eps_std = eps_std or 1
+        eps = torch.normal(mean=torch.zeros_like(mean),
+                           std=torch.ones_like(logs) * eps_std)
         return mean + torch.exp(logs) * eps
 
 
