@@ -1,21 +1,17 @@
-from builder import build
-from vision.datasets import CelebADataset, MNISTDataset
+from glow.builder import build
+from vision.datasets import CelebADataset
 from torchvision import transforms
-from train import Trainer
-from config import JsonConfig
+from glow.trainer import Trainer
+from glow.config import JsonConfig
 
 
-hparams = JsonConfig("hparams.json")
+hparams = JsonConfig("hparams_celeba.json")
 built = build(hparams, True)
-dataset = MNISTDataset("./datasets",
-                       transforms.Compose([transforms.CenterCrop(hparams.Data.center_crop),
+dataset = CelebADataset("/Users/chaiyujin/Downloads/database/CelebA",
+                        transforms.Compose([
+                                           transforms.CenterCrop(hparams.Data.center_crop),
                                            transforms.Resize(hparams.Data.resize),
                                            transforms.ToTensor()]))
-# dataset = CelebADataset("/home/chaiyujin/Downloads/Dataset/CelebA",
-#                         transforms.Compose([
-#                                            transforms.CenterCrop(hparams.Data.center_crop),
-#                                            transforms.Resize(hparams.Data.resize),
-#                                            transforms.ToTensor()]))
 
 trainer = Trainer(**built, dataset=dataset, hparams=hparams)
 trainer.train()

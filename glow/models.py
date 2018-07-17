@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from . import thops
 from . import modules
+from . import utils
 
 
 def f(in_channels, out_channels, hidden_channels):
@@ -189,23 +190,30 @@ class Glow(nn.Module):
                 hparams.Glow.y_classes, 2 * C)
             self.project_class = modules.LinearZeros(
                 C, hparams.Glow.y_classes)
+        # register prior hidden
+        num_device = len(utils.get_proper_device(hparams.Device.glow))
+        assert hparams.Train.batch_size % num_device == 0
+        self.register_parameter(
+            "prior_h",
+            nn.Parameter(torch.zeros([hparams.Train.batch_size // num_device,
+                                      self.flow.output_shapes[-1][1] * 2,
+                                      self.flow.output_shapes[-1][2],
+                                      self.flow.output_shapes[-1][3]])))
 
-    def prior(self, y_onehot):
-        z_shape = self.flow.output_shapes[-1]
-        B, C, H, W = y_onehot.size(0), z_shape[1], z_shape[2], z_shape[3]
-        h = torch.zeros([y_onehot.size(0), C * 2, H, W]).to(y_onehot.device)
+    def prior(self, y_onehot=None):
+        B, C = self.prior_h.size(0), self.prior_h.size(1)
+        h = self.prior_h.detach().clone()
+        assert torch.sum(h) == 0.0
         if self.hparams.Glow.learn_top:
             h = self.learn_top(h)
         if self.hparams.Glow.y_condition:
+            assert y_onehot is not None
             yp = self.project_ycond(y_onehot).view(B, C * 2, 1, 1)
             h += yp
         return thops.split_feature(h, "split")
 
     def forward(self, x=None, y_onehot=None, z=None,
                 eps_std=None, reverse=False):
-        assert y_onehot.size(-1) == self.y_classes, (
-            "y_onehot has {}, however, y_classes == {}".format(
-                int(y_onehot.size(-1)), self.y_classes))
         if not reverse:
             return self.normal_flow(x, y_onehot)
         else:
@@ -250,11 +258,11 @@ class Glow(nn.Module):
         if y_logits is None:
             return 0
         else:
-            return Glow.bce(y_logits, y_onehot.float())
+            return Glow.BCE(y_logits, y_onehot.float())
 
     @staticmethod
     def loss_class(y_logits, y):
         if y_logits is None:
             return 0
         else:
-            return Glow.ce(y_logits, y.long())
+            return Glow.CE(y_logits, y.long())

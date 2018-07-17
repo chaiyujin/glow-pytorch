@@ -58,6 +58,7 @@ def test_multidim_mean():
 
 
 def test_actnorm():
+    print("[Test]: actnorm")
     actnorm = modules.ActNorm2d(12)
     x = torch.Tensor(np.random.rand(2, 12, 64, 64))
     actnorm.initialize_parameters(x)
@@ -68,6 +69,7 @@ def test_actnorm():
 
 
 def test_conv1x1():
+    print("[Test]: invconv1x1")
     conv = modules.InvertibleConv1x1(96)
     x = torch.Tensor(np.random.rand(2, 96, 16, 16))
     y, det = conv(x, 0)
@@ -82,11 +84,10 @@ def test_gaussian():
     x = torch.Tensor(np.random.rand(4, 32, 16, 16))
     lh = modules.GaussianDiag.likelihood(mean, logs, x)
     logp = modules.GaussianDiag.logp(mean, logs, x)
-    print(lh.size())
-    print(logp.size(), logp)
 
 
 def test_flow_step():
+    print("[Test]: flow step")
     step = models.FlowStep(32, 256, flow_coupling="affine")
     x = torch.Tensor(np.random.rand(2, 32, 16, 16))
     y, det = step(x, 0, False)
@@ -96,6 +97,7 @@ def test_flow_step():
 
 
 def test_squeeze():
+    print("[Test]: SqueezeLayer")
     layer = modules.SqueezeLayer(2)
     img = cv2.imread("tsuki.jpeg")
     img = cv2.resize(img, (256, 256))
@@ -114,6 +116,7 @@ def test_squeeze():
 
 
 def test_flow_net():
+    print("[Test]: flow net")
     net = models.FlowNet((64, 64, 3), 256, 16, 3)
     x = torch.Tensor(np.random.rand(4, 3, 64, 64))
     y, det = net(x)
@@ -124,6 +127,7 @@ def test_flow_net():
 
 
 def test_glow():
+    print("[Test]: Glow")
     from glow.config import JsonConfig
     glow = models.Glow(JsonConfig("hparams.1.json"))
     x = torch.Tensor(np.random.rand(4, 3, 64, 64))
@@ -140,6 +144,6 @@ if __name__ == "__main__":
     test_conv1x1()
     test_gaussian()
     test_flow_step()
-    # test_squeeze()
+    test_squeeze()
     test_flow_net()
     test_glow()

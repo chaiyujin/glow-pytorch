@@ -12,9 +12,12 @@
         "flow_permutation": "invconv",
         "flow_coupling": "additive",
         "LU_decomposed": false,
-        "learn_top": true,
-        "y_condition": true,
+        "learn_top": false,
+        "y_condition": false,
         "y_classes": 40
+    },
+    "Criterion" : {
+        "y_condition": "BCE"
     },
     "Data" : {
         "center_crop": 160,

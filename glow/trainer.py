@@ -7,9 +7,9 @@ import numpy as np
 from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from torch.utils.data import DataLoader
-from utils import save, load, plot_prob
-from config import JsonConfig
-from models import Glow
+from .utils import save, load, plot_prob
+from .config import JsonConfig
+from .models import Glow
 
 
 class Trainer(object):
@@ -32,6 +32,7 @@ class Trainer(object):
             os.makedirs(self.checkpoints_dir)
         self.checkpoints_gap = hparams.Train.checkpoints_gap
         self.max_checkpoints = hparams.Train.max_checkpoints
+        # model relative
         self.graph = graph
         self.optim = optim
         self.weight_y = hparams.Train.weight_y
@@ -41,8 +42,6 @@ class Trainer(object):
         # copy devices from built graph
         self.devices = devices
         self.data_device = data_device
-        # tensorboard
-        self.writer = SummaryWriter(log_dir=self.log_dir)
         # number of training batches
         self.batch_size = hparams.Train.batch_size
         self.data_loader = DataLoader(dataset,
@@ -55,14 +54,19 @@ class Trainer(object):
         # lr schedule
         self.lrschedule = lrschedule
         self.loaded_step = loaded_step
+        # data relative
+        self.y_classes = hparams.Glow.y_classes
+        self.y_condition = hparams.Glow.y_condition
+        self.y_criterion = hparams.Criterion.y_condition
+        assert hparams.Criterion.y_condition in ["BCE", "CE"]
 
-        # log
+        # log relative
+        # tensorboard
+        self.writer = SummaryWriter(log_dir=self.log_dir)
         self.scalar_log_gaps = 25
         self.plot_gaps = 50
         self.inference_gap = 50
-        
-        self.y_classes = hparams.Glow.y_classes
-        
+                
     def train(self):
         # set to training state
         self.graph.train()
@@ -79,27 +83,38 @@ class Trainer(object):
                 self.optim.zero_grad()
                 if self.global_step % self.scalar_log_gaps == 0:
                     self.writer.add_scalar("lr/lr", lr, self.global_step)
-                # to device
+                # get batch data
                 for k in batch:
                     batch[k] = batch[k].to(self.data_device)
+                x = batch["x"]
+                y = None
+                y_onehot = None
+                if self.y_condition:
+                    if self.y_criterion == "BCE":
+                        assert "y_onehot" in batch, "BCE ask for `y_onehot` (torch.FloatTensor one-hot)"
+                        y_onehot = batch["y_onehot"]
+                    elif self.y_criterion == "CE":
+                        assert "y" in batch, "CE ask for `y` (torch.LongTensor indexes)"
+                        y = batch["y"]
+                        y_onehot = torch.zeros(self.batch_size, self.y_classes).to(batch["y"].device)
+                        y_onehot = y_onehot.scatter_(1, batch["y"].unsqueeze(-1), 1)
+
                 # forward phase
-                if "y_onehot" in batch:
-                    y_onehot = batch["y_onehot"]
-                else:
-                    y_onehot = torch.zeros(self.batch_size, self.y_classes).to(batch["y"].device)
-                    y_onehot = y_onehot.scatter_(1, batch["y"].unsqueeze(-1), 1)
-                z, objective, y_logits = self.graph(x=batch["x"], y_onehot=y_onehot)
+                z, logdet, y_logits = self.graph(x=x, y_onehot=y_onehot)
                 
                 # loss
-                loss_generative = Glow.loss_generative(batch["x"].size(), objective)
-                if "y_onehot" in batch:
-                    loss_ylcasses = Glow.loss_multi_classes(y_logits, batch["y_onehot"]) * self.weight_y
-                else:
-                    loss_yclasses = Glow.loss_class(y_logits, batch["y"]) * self.weight_y
+                loss_generative = Glow.loss_generative(logdet)
+                loss_classes = 0
+                if self.y_condition:
+                    if self.y_criterion == "BCE":
+                        loss_classes = Glow.loss_multi_classes(y_logits, y_onehot)
+                    elif self.y_criterion == "CE":
+                        loss_classes = Glow.loss_class(y_logits, y)
                 if self.global_step % self.scalar_log_gaps == 0:
                     self.writer.add_scalar("loss/loss_generative", loss_generative, self.global_step)
-                    self.writer.add_scalar("loss/loss_yclasses", loss_yclasses, self.global_step)
-                loss = loss_generative + loss_yclasses
+                    if self.y_condition:
+                        self.writer.add_scalar("loss/loss_classes", loss_classes, self.global_step)
+                loss = loss_generative + loss_classes * self.weight_y
 
                 # backward
                 self.graph.zero_grad()
@@ -126,17 +141,18 @@ class Trainer(object):
                 if self.global_step % self.plot_gaps == 0:
                     img = self.graph(z=z, y_onehot=y_onehot, reverse=True)
                     img = torch.clamp(img, min=0, max=1.0)
-                    if "y_onehot" in batch:
-                        y_pred = F.sigmoid(y_logits)
-                    else:
-                        y_pred = torch.zeros_like(y_logits).scatter_(1, torch.argmax(F.softmax(y_logits, dim=1), dim=1, keepdim=True), 1)
-                    y_true = y_onehot
+                    if self.y_condition:
+                        if self.y_criterion == "BCE":
+                            y_pred = F.sigmoid(y_logits)
+                        elif self.y_criterion == "CE":
+                            y_pred = torch.zeros_like(y_logits).scatter_(1, torch.argmax(F.softmax(y_logits, dim=1), dim=1, keepdim=True), 1)
+                        y_true = y_onehot
                     for bi in range(min([len(img), 4])):
                         self.writer.add_image("0_reverse/{}".format(bi), torch.cat((img[bi], batch["x"][bi]), dim=1), self.global_step)
-                        self.writer.add_image("1_prob/{}".format(bi),
-                                              plot_prob([y_pred[bi], y_true[bi]],
-                                                        ["pred", "true"]),
-                                              self.global_step)
+                        if self.y_condition:
+                            self.writer.add_image("1_prob/{}".format(bi),
+                                                  plot_prob([y_pred[bi], y_true[bi]], ["pred", "true"]),
+                                                  self.global_step)
 
                 # inference
                 if hasattr(self, "inference_gap"):
