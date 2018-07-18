@@ -35,9 +35,9 @@ Currently, I trained model for 25,000 batches with `hparams/celeba.json` using C
 ### Reconstruction
 Following are some samples at training phase. First row is decoded by reversal flowing, second row is the original image.
 
-    ![](./pictures/individualImage.png)
-    ![](./pictures/individualImage2.png)
-    ![](./pictures/individualImage3.png)
+![](./pictures/individualImage.png)
+![](./pictures/individualImage2.png)
+![](./pictures/individualImage3.png)
 
 ### Manipulate attribute
 Use the method decribed in paper to calculate `z_pos` and `z_neg` for a given attribute.
