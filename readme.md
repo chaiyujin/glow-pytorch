@@ -42,24 +42,22 @@ Following are some samples at training phase. First row is decoded by reversal f
 - **Manipulate attribute**:
 Use the method decribed in paper to calculate `z_pos` and `z_neg` for a given attribute.
 And `z_delta = z_pos - z_neg` is the direction to manipulate the original image.
-(Following images are resized from 64x64 to 256x256)
 
     - reconstructed:
 
-    ![](./pictures/infer/reconstruct_origin.png)
+    <img src="./pictures/infer/reconstruct_origin.png" width="96" />
     - manipulate `smile`:
 
-    ![](./pictures/infer/attr_Smiling_1.png)
-    ![](./pictures/infer/attr_Smiling_2.png)
-    ![](./pictures/infer/attr_Smiling_3.png)
-    ![](./pictures/infer/attr_Smiling_4.png)
-    ![](./pictures/infer/attr_Smiling_5.png)
+    <img src="./pictures/infer/attr_Smiling_1.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_2.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_3.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_4.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_5.png" width="96" />
 
-    ![](./pictures/infer/attr_Smiling_6.png)
-    ![](./pictures/infer/attr_Smiling_7.png)
-    ![](./pictures/infer/attr_Smiling_8.png)
-    ![](./pictures/infer/attr_Smiling_9.png)
-    ![](./pictures/infer/attr_Smiling_10.png)
-
+    <img src="./pictures/infer/attr_Smiling_6.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_7.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_8.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_9.png" width="96" />
+    <img src="./pictures/infer/attr_Smiling_10.png" width="96" />
 # Issues
 There might be some errors in my codes. Please help me to figure out.
