@@ -64,7 +64,7 @@ def test_actnorm():
     actnorm.initialize_parameters(x)
     y, det = actnorm(x, 0)
     x_, _ = actnorm(y, None, True)
-    print("actnorm (forward, reverse) delta", float(torch.max(torch.abs(x_ - x))))
+    print("actnorm (forward,reverse) delta", float(torch.max(torch.abs(x_-x))))
     print("  det", float(det))
 
 
@@ -74,16 +74,17 @@ def test_conv1x1():
     x = torch.Tensor(np.random.rand(2, 96, 16, 16))
     y, det = conv(x, 0)
     x_, _ = conv(y, None, True)
-    print("conv1x1 (forward, reverse) delta", float(torch.max(torch.abs(x_ - x))))
+    print("conv1x1 (forward,reverse) delta", float(torch.max(torch.abs(x_-x))))
     print("  det", float(det))
 
 
 def test_gaussian():
-    mean = torch.zeros((4, 32, 16, 16))
-    logs = torch.ones((4, 32, 16, 16))
-    x = torch.Tensor(np.random.rand(4, 32, 16, 16))
-    lh = modules.GaussianDiag.likelihood(mean, logs, x)
-    logp = modules.GaussianDiag.logp(mean, logs, x)
+    # mean = torch.zeros((4, 32, 16, 16))
+    # logs = torch.ones((4, 32, 16, 16))
+    # x = torch.Tensor(np.random.rand(4, 32, 16, 16))
+    # lh = modules.GaussianDiag.likelihood(mean, logs, x)
+    # logp = modules.GaussianDiag.logp(mean, logs, x)
+    pass
 
 
 def test_flow_step():
@@ -92,14 +93,14 @@ def test_flow_step():
     x = torch.Tensor(np.random.rand(2, 32, 16, 16))
     y, det = step(x, 0, False)
     x_, det0 = step(y, det, True)
-    print("flow_step (forward, reverse) delta", float(torch.max(torch.abs(x_ - x))))
+    print("flowstep (forward,reverse)delta", float(torch.max(torch.abs(x_-x))))
     print("  det", det, det0)
 
 
 def test_squeeze():
     print("[Test]: SqueezeLayer")
     layer = modules.SqueezeLayer(2)
-    img = cv2.imread("tsuki.jpeg")
+    img = cv2.imread("pictures/tsuki.jpeg")
     img = cv2.resize(img, (256, 256))
     img = img.transpose((2, 0, 1))
     x = torch.Tensor([img])

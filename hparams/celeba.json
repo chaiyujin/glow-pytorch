@@ -42,7 +42,7 @@
         "data": "cuda:0"
     },
     "Train": {
-        "batch_size": 8,
+        "batch_size": 12,
         "num_batches": 1000000,
         "max_grad_clip": 5,
         "max_grad_norm": 100,
@@ -56,6 +56,6 @@
         "weight_y": 0.5
     },
     "Infer": {
-        "pre_trained": "./results/trained/trained.pkg"
+        "pre_trained": "./results/celeba/trained.pkg"
     }
 }

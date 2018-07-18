@@ -1,3 +1,4 @@
 *.pyc
 results/
 datasets/
+celeba_z/

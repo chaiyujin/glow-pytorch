@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from tqdm import tqdm
 from . import thops
 from . import modules
 from . import utils
@@ -191,7 +192,7 @@ class Glow(nn.Module):
             self.project_class = modules.LinearZeros(
                 C, hparams.Glow.y_classes)
         # register prior hidden
-        num_device = len(utils.get_proper_device(hparams.Device.glow))
+        num_device = len(utils.get_proper_device(hparams.Device.glow, False))
         assert hparams.Train.batch_size % num_device == 0
         self.register_parameter(
             "prior_h",
@@ -252,6 +253,28 @@ class Glow(nn.Module):
         for name, m in self.named_modules():
             if (m.__class__.__name__.find("ActNorm") >= 0):
                 m.inited = inited
+
+    def generate_z(self, dataset, to_numpy=False):
+        self.eval()
+        with torch.no_grad():
+            B = self.hparams.Train.batch_size
+            N = len(dataset)
+            Z = []
+            for i in tqdm(range(0, N, B)):
+                j = min([i + B, N])
+                # generate z for data from i to j
+                xs = [dataset[k]["x"] for k in range(i, j)]
+                while len(xs) < B:
+                    xs.append(dataset[0]["x"])
+                xs = torch.stack(xs).cuda()
+                zs, _, _ = self(xs)
+                for k in range(i, j):
+                    z = zs[k - i]
+                    if to_numpy:
+                        z = z.detach().cpu().numpy()
+                    Z.append(z)
+        self.train()
+        return Z
 
     @staticmethod
     def loss_generative(nll):

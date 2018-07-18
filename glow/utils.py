@@ -9,11 +9,12 @@ import matplotlib.pyplot as plt
 from shutil import copyfile
 
 
-def get_proper_cuda_device(device):
+def get_proper_cuda_device(device, verbose=True):
     if not isinstance(device, list):
         device = [device]
     count = torch.cuda.device_count()
-    print("[Builder]: Found {} gpu".format(count))
+    if verbose:
+        print("[Builder]: Found {} gpu".format(count))
     for i in range(len(device)):
         d = device[i]
         did = None
@@ -25,7 +26,8 @@ def get_proper_cuda_device(device):
         if did is None:
             raise ValueError("[Builder]: Wrong cuda id {}".format(d))
         if did < 0 or did >= count:
-            print("[Builder]: {} is not found, ignore.".format(d))
+            if verbose:
+                print("[Builder]: {} is not found, ignore.".format(d))
             device[i] = None
         else:
             device[i] = did
@@ -33,7 +35,7 @@ def get_proper_cuda_device(device):
     return device
 
 
-def get_proper_device(devices):
+def get_proper_device(devices, verbose=True):
     origin = copy.copy(devices)
     devices = copy.copy(devices)
     if not isinstance(devices, list):
@@ -42,9 +44,10 @@ def get_proper_device(devices):
     use_gpu = any([(d.find("cuda")>=0 or isinstance(d, int)) for d in devices])
     assert not (use_cpu and use_gpu), "{} contains cpu and cuda device.".format(devices)
     if use_gpu:
-        devices = get_proper_cuda_device(devices)
+        devices = get_proper_cuda_device(devices, verbose)
         if len(devices) == 0:
-            print("[Builder]: Failed to find any valid gpu in {}, use `cpu`.".format(origin))
+            if verbose:
+                print("[Builder]: Failed to find any valid gpu in {}, use `cpu`.".format(origin))
             devices = ["cpu"]
     return devices
 
