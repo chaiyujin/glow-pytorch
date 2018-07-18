@@ -46,6 +46,7 @@ And `z_delta = z_pos - z_neg` is the direction to manipulate the original image.
     - reconstructed:
 
     <img src="./pictures/infer/reconstruct_origin.png" width="96" />
+
     - manipulate `smile`:
 
     <img src="./pictures/infer/attr_Smiling_1.png" width="96" />
