@@ -32,22 +32,22 @@ Currently, I trained model for 25,000 batches with `hparams/celeba.json` using C
 | learn_top        | false                       |
 | y_condition      | false                       |
 
-- **Reconstruction**:
+### Reconstruction
 Following are some samples at training phase. First row is decoded by reversal flowing, second row is the original image.
 
     ![](./pictures/individualImage.png)
     ![](./pictures/individualImage2.png)
     ![](./pictures/individualImage3.png)
 
-- **Manipulate attribute**:
+### Manipulate attribute
 Use the method decribed in paper to calculate `z_pos` and `z_neg` for a given attribute.
 And `z_delta = z_pos - z_neg` is the direction to manipulate the original image.
 
-    - reconstructed:
+- reconstructed:
 
     <img src="./pictures/infer/reconstruct_origin.png" width="96" />
 
-    - manipulate `smile`:
+- manipulate `smile` (from negative to origin):
 
     <img src="./pictures/infer/attr_Smiling_1.png" width="96" />
     <img src="./pictures/infer/attr_Smiling_2.png" width="96" />
@@ -55,10 +55,13 @@ And `z_delta = z_pos - z_neg` is the direction to manipulate the original image.
     <img src="./pictures/infer/attr_Smiling_4.png" width="96" />
     <img src="./pictures/infer/attr_Smiling_5.png" width="96" />
 
+- manipulate `smile` (from origin to positive):
+
     <img src="./pictures/infer/attr_Smiling_6.png" width="96" />
     <img src="./pictures/infer/attr_Smiling_7.png" width="96" />
     <img src="./pictures/infer/attr_Smiling_8.png" width="96" />
     <img src="./pictures/infer/attr_Smiling_9.png" width="96" />
     <img src="./pictures/infer/attr_Smiling_10.png" width="96" />
+
 # Issues
 There might be some errors in my codes. Please help me to figure out.
