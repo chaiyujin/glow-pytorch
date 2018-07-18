@@ -254,12 +254,22 @@ class Glow(nn.Module):
             if (m.__class__.__name__.find("ActNorm") >= 0):
                 m.inited = inited
 
-    def generate_z(self, dataset, to_numpy=False):
+    def generate_z(self, img):
+        self.eval()
+        B = self.hparams.Train.batch_size
+        x = img.unsqueeze(0).repeat(B, 1, 1, 1).cuda()
+        z,_, _ = self(x)
+        self.train()
+        return z[0].detach().cpu().numpy()
+
+    def generate_attr_deltaz(self, dataset):
+        assert "y_onehot" in dataset[0]
         self.eval()
         with torch.no_grad():
             B = self.hparams.Train.batch_size
             N = len(dataset)
-            Z = []
+            attrs_pos_z = [[0, 0] for _ in range(self.y_classes)]
+            attrs_neg_z = [[0, 0] for _ in range(self.y_classes)]
             for i in tqdm(range(0, N, B)):
                 j = min([i + B, N])
                 # generate z for data from i to j
@@ -269,12 +279,28 @@ class Glow(nn.Module):
                 xs = torch.stack(xs).cuda()
                 zs, _, _ = self(xs)
                 for k in range(i, j):
-                    z = zs[k - i]
-                    if to_numpy:
-                        z = z.detach().cpu().numpy()
-                    Z.append(z)
+                    z = zs[k - i].detach().cpu().numpy()
+                    # append to different attrs
+                    y = dataset[k]["y_onehot"]
+                    for ai in range(self.y_classes):
+                        if y[ai] > 0:
+                            attrs_pos_z[ai][0] += z
+                            attrs_pos_z[ai][1] += 1
+                        else:
+                            attrs_neg_z[ai][0] += z
+                            attrs_neg_z[ai][1] += 1
+                # break
+            deltaz = []
+            for ai in range(self.y_classes):
+                if attrs_pos_z[ai][1] == 0:
+                    attrs_pos_z[ai][1] = 1
+                if attrs_neg_z[ai][1] == 0:
+                    attrs_neg_z[ai][1] = 1
+                z_pos = attrs_pos_z[ai][0] / float(attrs_pos_z[ai][1])
+                z_neg = attrs_neg_z[ai][0] / float(attrs_neg_z[ai][1])
+                deltaz.append(z_pos - z_neg)
         self.train()
-        return Z
+        return deltaz
 
     @staticmethod
     def loss_generative(nll):
