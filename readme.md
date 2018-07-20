@@ -18,7 +18,7 @@ This is pytorch implementation of paper "Glow: Generative Flow with Invertible 1
     ```
 
 # Training result
-Currently, I trained model for 25,000 batches with `hparams/celeba.json` using CelebA dataset. In short, I trained with follwing parameters
+Currently, I trained model for 45,000 batches with `hparams/celeba.json` using CelebA dataset. In short, I trained with follwing parameters
 
 |      HParam      |            Value            |
 | ---------------- | --------------------------- |
@@ -33,35 +33,53 @@ Currently, I trained model for 25,000 batches with `hparams/celeba.json` using C
 | y_condition      | false                       |
 
 ### Reconstruction
-Following are some samples at training phase. First row is decoded by reversal flowing, second row is the original image.
+Following are some samples at training phase. Row 1: reconstructed, Row 2: original.
 
-    ![](./pictures/individualImage.png)
-    ![](./pictures/individualImage2.png)
-    ![](./pictures/individualImage3.png)
+![](./pictures/individualImage.png)
+![](./pictures/individualImage2.png)
+![](./pictures/individualImage3.png)
 
 ### Manipulate attribute
 Use the method decribed in paper to calculate `z_pos` and `z_neg` for a given attribute.
 And `z_delta = z_pos - z_neg` is the direction to manipulate the original image.
 
-- reconstructed:
 
-    <img src="./pictures/infer/reconstruct_origin.png" width="96" />
+- manipulate `Smiling` (from negative to positive):
 
-- manipulate `smile` (from negative to origin):
+    <img src="./pictures/infer_210/attr_Smiling_0.png" width="96" />
+    <img src="./pictures/infer_210/attr_Smiling_2.png" width="96" />
+    <img src="./pictures/infer_210/attr_Smiling_4.png" width="96" />
+    <img src="./pictures/infer_210/attr_Smiling_6.png" width="96" />
+    <img src="./pictures/infer_210/attr_Smiling_8.png" width="96" />
+    <img src="./pictures/infer_210/attr_Smiling_10.png" width="96" />
 
-    <img src="./pictures/infer/attr_Smiling_1.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_2.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_3.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_4.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_5.png" width="96" />
+- manipulate `Young` (from negative to positive):
 
-- manipulate `smile` (from origin to positive):
+    <img src="./pictures/infer_988/attr_Young_0.png" width="96" />
+    <img src="./pictures/infer_988/attr_Young_2.png" width="96" />
+    <img src="./pictures/infer_988/attr_Young_4.png" width="96" />
+    <img src="./pictures/infer_988/attr_Young_6.png" width="96" />
+    <img src="./pictures/infer_988/attr_Young_8.png" width="96" />
+    <img src="./pictures/infer_988/attr_Young_10.png" width="96" />
 
-    <img src="./pictures/infer/attr_Smiling_6.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_7.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_8.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_9.png" width="96" />
-    <img src="./pictures/infer/attr_Smiling_10.png" width="96" />
+- manipulate `Pale_Skin` (from negative to positive):
+
+    <img src="./pictures/infer_150/attr_Pale_Skin_0.png" width="96" />
+    <img src="./pictures/infer_150/attr_Pale_Skin_2.png" width="96" />
+    <img src="./pictures/infer_150/attr_Pale_Skin_4.png" width="96" />
+    <img src="./pictures/infer_150/attr_Pale_Skin_6.png" width="96" />
+    <img src="./pictures/infer_150/attr_Pale_Skin_8.png" width="96" />
+    <img src="./pictures/infer_150/attr_Pale_Skin_10.png" width="96" />
+
+- manipulate `Male` (from negative to positive):
+
+    <img src="./pictures/infer_141/attr_Male_0.png" width="96" />
+    <img src="./pictures/infer_141/attr_Male_2.png" width="96" />
+    <img src="./pictures/infer_141/attr_Male_4.png" width="96" />
+    <img src="./pictures/infer_141/attr_Male_6.png" width="96" />
+    <img src="./pictures/infer_141/attr_Male_8.png" width="96" />
+    <img src="./pictures/infer_141/attr_Male_10.png" width="96" />
+
 
 # Issues
 There might be some errors in my codes. Please help me to figure out.
