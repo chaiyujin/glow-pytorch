@@ -34,8 +34,8 @@ class _ActNorm(nn.Module):
             return
         assert input.device == self.bias.device
         with torch.no_grad():
-            bias = thops.mean(input, dim=[0, 2, 3], keepdim=True) * -1.0
-            vars = thops.mean((input + bias) ** 2, dim=[0, 2, 3], keepdim=True)
+            bias = thops.mean(input.clone(), dim=[0, 2, 3], keepdim=True) * -1.0
+            vars = thops.mean((input.clone() + bias) ** 2, dim=[0, 2, 3], keepdim=True)
             logs = torch.log(self.scale/(torch.sqrt(vars)+1e-6))
             self.bias.data.copy_(bias.data)
             self.logs.data.copy_(logs.data)

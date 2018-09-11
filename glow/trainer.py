@@ -49,7 +49,7 @@ class Trainer(object):
         self.batch_size = hparams.Train.batch_size
         self.data_loader = DataLoader(dataset,
                                       batch_size=self.batch_size,
-                                      num_workers=8,
+                                    #   num_workers=8,
                                       shuffle=True,
                                       drop_last=True)
         self.n_epoches = (hparams.Train.num_batches+len(self.data_loader)-1)
@@ -154,7 +154,7 @@ class Trainer(object):
                     # img = torch.clamp(img, min=0, max=1.0)
                     if self.y_condition:
                         if self.y_criterion == "multi-classes":
-                            y_pred = F.sigmoid(y_logits)
+                            y_pred = torch.sigmoid(y_logits)
                         elif self.y_criterion == "single-class":
                             y_pred = thops.onehot(torch.argmax(F.softmax(y_logits, dim=1), dim=1, keepdim=True),
                                                   self.y_classes)

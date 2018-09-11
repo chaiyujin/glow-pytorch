@@ -32,6 +32,8 @@ Currently, I trained model for 45,000 batches with `hparams/celeba.json` using C
 | learn_top        | false                       |
 | y_condition      | false                       |
 
+- Download from [Dropbox](https://www.dropbox.com/s/3wx7vmsurjzfelm/trained.pkg?dl=0)
+
 ### Reconstruction
 Following are some samples at training phase. Row 1: reconstructed, Row 2: original.
 

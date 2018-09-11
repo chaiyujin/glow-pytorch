@@ -10,8 +10,8 @@ from . import utils
 
 def f(in_channels, out_channels, hidden_channels):
     return nn.Sequential(
-        modules.Conv2d(in_channels, hidden_channels), nn.ReLU(inplace=True),
-        modules.Conv2d(hidden_channels, hidden_channels, kernel_size=[1, 1]), nn.ReLU(inplace=True),
+        modules.Conv2d(in_channels, hidden_channels), nn.ReLU(inplace=False),
+        modules.Conv2d(hidden_channels, hidden_channels, kernel_size=[1, 1]), nn.ReLU(inplace=False),
         modules.Conv2dZeros(hidden_channels, out_channels))
 
 
@@ -73,7 +73,7 @@ class FlowStep(nn.Module):
         elif self.flow_coupling == "affine":
             h = self.f(z1)
             shift, scale = thops.split_feature(h, "cross")
-            scale = F.sigmoid(scale + 2.)
+            scale = torch.sigmoid(scale + 2.)
             z2 += shift
             z2 *= scale
             logdet = thops.sum(torch.log(scale), dim=[1, 2, 3]) + logdet
@@ -89,7 +89,7 @@ class FlowStep(nn.Module):
         elif self.flow_coupling == "affine":
             h = self.f(z1)
             shift, scale = thops.split_feature(h, "cross")
-            scale = F.sigmoid(scale + 2.)
+            scale = torch.sigmoid(scale + 2.)
             z2 /= scale
             z2 -= shift
             logdet = -thops.sum(torch.log(scale), dim=[1, 2, 3]) + logdet
