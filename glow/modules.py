@@ -222,11 +222,11 @@ class InvertibleConv1x1(nn.Module):
         w_shape = self.w_shape
         if not self.LU:
             pixels = thops.pixels(input)
-            dlogdet = torch.log(torch.abs(torch.det(self.weight))) * pixels
+            dlogdet = torch.slogdet(self.weight) * pixels
             if not reverse:
                 weight = self.weight.view(w_shape[0], w_shape[1], 1, 1)
             else:
-                weight = torch.inverse(self.weight)\
+                weight = torch.inverse(self.weight.double()).float()\
                               .view(w_shape[0], w_shape[1], 1, 1)
             return weight, dlogdet
         else:
@@ -240,8 +240,8 @@ class InvertibleConv1x1(nn.Module):
             if not reverse:
                 w = torch.matmul(self.p, torch.matmul(l, u))
             else:
-                l = l.inverse()
-                u = u.inverse()
+                l = torch.inverse(l.double()).float()
+                u = torch.inverse(u.double()).float()
                 w = torch.matmul(u, torch.matmul(l, self.p.inverse()))
             return w.view(w_shape[0], w_shape[1], 1, 1), dlogdet
 
