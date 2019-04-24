@@ -208,8 +208,8 @@ class InvertibleConv1x1(nn.Module):
             l_mask = np.tril(np.ones(w_shape, dtype=np.float32), -1)
             eye = np.eye(*w_shape, dtype=np.float32)
 
-            self.p = torch.Tensor(np_p.astype(np.float32))
-            self.sign_s = torch.Tensor(np_sign_s.astype(np.float32))
+            self.p = nn.Parameter(torch.Tensor(np_p.astype(np.float32)))
+            self.sign_s = nn.Parameter(torch.Tensor(np_sign_s.astype(np.float32)))
             self.l = nn.Parameter(torch.Tensor(np_l.astype(np.float32)))
             self.log_s = nn.Parameter(torch.Tensor(np_log_s.astype(np.float32)))
             self.u = nn.Parameter(torch.Tensor(np_u.astype(np.float32)))
